@@ -177,6 +177,12 @@ func startInvalidationConsumer(cfg config.Config, logger *slog.Logger, matcher *
 		logger.Warn("rabbitmq queue bind failed; search cache invalidation disabled", "error", err)
 		return nil
 	}
+	if err := ch.QueueBind(queue.Name, events.PropertyChangedEvent, cfg.EventExchange, false, nil); err != nil {
+		_ = ch.Close()
+		_ = conn.Close()
+		logger.Warn("rabbitmq property queue bind failed; search cache invalidation disabled", "error", err)
+		return nil
+	}
 	deliveries, err := ch.Consume(queue.Name, "", false, false, false, false, nil)
 	if err != nil {
 		_ = ch.Close()
@@ -188,15 +194,34 @@ func startInvalidationConsumer(cfg config.Config, logger *slog.Logger, matcher *
 		defer ch.Close()
 		for delivery := range deliveries {
 			var event struct {
-				Type    string                         `json:"type"`
-				Payload events.SearchInvalidatePayload `json:"payload"`
+				Type    string          `json:"type"`
+				Payload json.RawMessage `json:"payload"`
 			}
 			if err := json.Unmarshal(delivery.Body, &event); err != nil {
 				_ = delivery.Nack(false, false)
 				continue
 			}
-			if event.Type == events.SearchInvalidateEvent && event.Payload.BusinessID != "" && event.Payload.UserID != "" {
-				matcher.Invalidate(event.Payload.BusinessID, event.Payload.UserID)
+			switch event.Type {
+			case events.SearchInvalidateEvent:
+				var payload events.SearchInvalidatePayload
+				if err := json.Unmarshal(event.Payload, &payload); err != nil {
+					_ = delivery.Nack(false, false)
+					continue
+				}
+				if payload.BusinessID != "" && payload.UserID != "" {
+					matcher.Invalidate(payload.BusinessID, payload.UserID)
+				}
+			case events.PropertyChangedEvent:
+				var payload events.PropertyChangedPayload
+				if err := json.Unmarshal(event.Payload, &payload); err != nil {
+					_ = delivery.Nack(false, false)
+					continue
+				}
+				if payload.BusinessID != "" && payload.PropertyID != "" {
+					if err := matcher.NotifyMatchingContactRequests(context.Background(), payload.BusinessID, payload.PropertyID); err != nil {
+						logger.Warn("property match notification failed", "business_id", payload.BusinessID, "property_id", payload.PropertyID, "error", err)
+					}
+				}
 			}
 			_ = delivery.Ack(false)
 		}

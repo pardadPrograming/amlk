@@ -441,6 +441,7 @@ func (s *CachedStore) CreatePropertyFile(ctx context.Context, file domain.Proper
 	item, err := s.primary.CreatePropertyFile(ctx, file)
 	if err == nil {
 		s.publishSearchInvalidate(ctx, item.BusinessID, item.OwnerUserID)
+		s.publishPropertyChanged(ctx, item.BusinessID, item.OwnerUserID, item.ID)
 	}
 	return item, err
 }
@@ -481,6 +482,7 @@ func (s *CachedStore) UpdatePropertyFile(ctx context.Context, file domain.Proper
 	item, err := s.primary.UpdatePropertyFile(ctx, file)
 	if err == nil {
 		s.publishSearchInvalidate(ctx, item.BusinessID, item.OwnerUserID)
+		s.publishPropertyChanged(ctx, item.BusinessID, item.OwnerUserID, item.ID)
 	}
 	return item, err
 }
@@ -537,6 +539,19 @@ func (s *CachedStore) publishSearchInvalidate(ctx context.Context, businessID, u
 		Payload: events.SearchInvalidatePayload{
 			BusinessID: businessID,
 			UserID:     userID,
+		},
+	})
+}
+
+func (s *CachedStore) publishPropertyChanged(ctx context.Context, businessID, userID, propertyID string) {
+	events.SafePublish(ctx, s.logger, s.publisher, events.Event{
+		Type:        events.PropertyChangedEvent,
+		AggregateID: businessID + ":" + propertyID,
+		OccurredAt:  time.Now().UTC(),
+		Payload: events.PropertyChangedPayload{
+			BusinessID: businessID,
+			UserID:     userID,
+			PropertyID: propertyID,
 		},
 	})
 }

@@ -139,6 +139,7 @@ type FileObject struct {
 type Notification struct {
 	ID         string    `json:"id"`
 	UserID     string    `json:"userId"`
+	DedupKey   string    `json:"dedupKey,omitempty"`
 	Type       string    `json:"type"`
 	Title      string    `json:"title"`
 	Body       string    `json:"body"`

@@ -88,7 +88,6 @@ func (s *PropertyService) Create(ctx context.Context, userID, businessID string,
 	if err := s.syncPropertyVaults(ctx, userID, businessID, created); err != nil {
 		return domain.PropertyFile{}, err
 	}
-	s.notifyMatchingContactRequests(ctx, businessID, created)
 	return created, nil
 }
 
@@ -138,7 +137,6 @@ func (s *PropertyService) Update(ctx context.Context, userID, businessID, fileID
 	if err := s.syncPropertyVaults(ctx, userID, businessID, updated); err != nil {
 		return domain.PropertyFile{}, err
 	}
-	s.notifyMatchingContactRequests(ctx, businessID, updated)
 	return updated, nil
 }
 

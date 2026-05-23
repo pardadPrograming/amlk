@@ -107,6 +107,7 @@ func (s *MongoPlatformStore) EnsurePlatformIndexes(ctx context.Context) error {
 			models: []mongo.IndexModel{
 				{Keys: bson.D{{Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)},
 				{Keys: bson.D{{Key: "userId", Value: 1}, {Key: "createdAt", Value: -1}}},
+				{Keys: bson.D{{Key: "userId", Value: 1}, {Key: "dedupKey", Value: 1}}, Options: options.Index().SetUnique(true).SetSparse(true)},
 			},
 		},
 		{
@@ -288,10 +289,31 @@ func (s *MongoPlatformStore) CreatePropertyFile(ctx context.Context, file domain
 }
 
 func (s *MongoPlatformStore) CreateNotification(ctx context.Context, notification domain.Notification) (domain.Notification, error) {
+	if notification.DedupKey != "" {
+		existing, err := findOneStoredData[domain.Notification](ctx, s.db.Collection("notifications"), bson.M{
+			"userId":   notification.UserID,
+			"dedupKey": notification.DedupKey,
+		})
+		if err == nil {
+			return existing, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return domain.Notification{}, err
+		}
+	}
 	now := time.Now().UTC()
 	notification.ID = support.NewID()
 	notification.CreatedAt = now
 	if err := s.saveNotification(ctx, notification); err != nil {
+		if notification.DedupKey != "" {
+			existing, findErr := findOneStoredData[domain.Notification](ctx, s.db.Collection("notifications"), bson.M{
+				"userId":   notification.UserID,
+				"dedupKey": notification.DedupKey,
+			})
+			if findErr == nil {
+				return existing, nil
+			}
+		}
 		return domain.Notification{}, err
 	}
 	return notification, nil
@@ -1169,14 +1191,18 @@ func (s *MongoPlatformStore) saveFile(ctx context.Context, item domain.FileObjec
 }
 
 func (s *MongoPlatformStore) saveNotification(ctx context.Context, item domain.Notification) error {
-	return s.upsertStored(ctx, "notifications", bson.M{"id": item.ID}, bson.M{
+	doc := bson.M{
 		"id":        item.ID,
 		"userId":    item.UserID,
 		"type":      item.Type,
 		"readAt":    item.ReadAt,
 		"createdAt": item.CreatedAt,
 		"data":      item,
-	})
+	}
+	if item.DedupKey != "" {
+		doc["dedupKey"] = item.DedupKey
+	}
+	return s.upsertStored(ctx, "notifications", bson.M{"id": item.ID}, doc)
 }
 
 func (s *MongoPlatformStore) saveContact(ctx context.Context, item domain.Contact) error {

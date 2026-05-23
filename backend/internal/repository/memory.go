@@ -476,6 +476,13 @@ func (s *MemoryStore) DeleteFile(ctx context.Context, fileID string) error {
 func (s *MemoryStore) CreateNotification(ctx context.Context, notification domain.Notification) (domain.Notification, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if notification.DedupKey != "" {
+		for _, existing := range s.notifications {
+			if existing.UserID == notification.UserID && existing.DedupKey == notification.DedupKey {
+				return existing, nil
+			}
+		}
+	}
 	notification.ID = support.NewID()
 	notification.CreatedAt = time.Now().UTC()
 	s.notifications[notification.ID] = notification

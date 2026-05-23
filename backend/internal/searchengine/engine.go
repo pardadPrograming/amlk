@@ -3,6 +3,7 @@ package searchengine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
 	"sort"
 	"strings"
@@ -187,6 +188,28 @@ func (s *OptimizedMatchingService) propertyIndex(ctx context.Context, businessID
 }
 
 func (s *OptimizedMatchingService) accessiblePropertyFiles(ctx context.Context, businessID, userID string) ([]domain.PropertyFile, map[string][]domain.PropertyMatchAccess, error) {
+	accessibleVaults, accessibleVaultIDs, err := s.accessibleVaultsForUser(ctx, businessID, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	allFiles, err := s.store.ListPropertyFilesForAccess(ctx, businessID, userID, accessibleVaultIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	files := make([]domain.PropertyFile, 0, len(allFiles))
+	accessByFileID := map[string][]domain.PropertyMatchAccess{}
+	for _, file := range allFiles {
+		access := propertyMatchAccessForFile(file, userID, accessibleVaults)
+		if len(access) == 0 {
+			continue
+		}
+		files = append(files, file)
+		accessByFileID[file.ID] = access
+	}
+	return files, accessByFileID, nil
+}
+
+func (s *OptimizedMatchingService) accessibleVaultsForUser(ctx context.Context, businessID, userID string) (map[string]domain.ChannelVault, []string, error) {
 	user, err := s.store.GetUser(ctx, userID)
 	if err != nil {
 		return nil, nil, err
@@ -238,22 +261,72 @@ func (s *OptimizedMatchingService) accessiblePropertyFiles(ctx context.Context, 
 			}
 		}
 	}
+	return accessibleVaults, accessibleVaultIDs, nil
+}
 
-	allFiles, err := s.store.ListPropertyFilesForAccess(ctx, businessID, userID, accessibleVaultIDs)
+func (s *OptimizedMatchingService) NotifyMatchingContactRequests(ctx context.Context, businessID, propertyID string) error {
+	file, err := s.store.GetPropertyFile(ctx, businessID, propertyID)
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
-	files := make([]domain.PropertyFile, 0, len(allFiles))
-	accessByFileID := map[string][]domain.PropertyMatchAccess{}
-	for _, file := range allFiles {
-		access := propertyMatchAccessForFile(file, userID, accessibleVaults)
-		if len(access) == 0 {
+	contacts, err := s.store.ListContacts(ctx, businessID)
+	if err != nil {
+		return err
+	}
+	accessCache := map[string]map[string]domain.ChannelVault{}
+	for _, contact := range contacts {
+		if contact.CreatedByID == "" || len(contact.Requests) == 0 {
 			continue
 		}
-		files = append(files, file)
-		accessByFileID[file.ID] = access
+		if !s.fileVisibleToUser(ctx, contact.CreatedByID, businessID, file, accessCache) {
+			continue
+		}
+		for _, request := range contact.Requests {
+			if request.ID == "" || request.Status == "done" || request.Status == "finished" || request.Status == "suspended" {
+				continue
+			}
+			match := MatchProperty(request, file)
+			if match.Tier == "" || match.Score == 0 {
+				continue
+			}
+			dedupKey := fmt.Sprintf("request_property_match:%s:%s:%s", contact.CreatedByID, request.ID, file.ID)
+			_, _ = s.store.CreateNotification(ctx, domain.Notification{
+				UserID:     contact.CreatedByID,
+				DedupKey:   dedupKey,
+				Type:       "request_property_match",
+				Title:      "فایل مناسب برای درخواست مشتری",
+				Body:       fmt.Sprintf("فایل %s با درخواست %s از مشتری %s حدود %d%% مچ شد.", file.Title, request.Title, contact.DisplayName, match.Score),
+				BusinessID: businessID,
+				PropertyID: file.ID,
+				RequestID:  request.ID,
+			})
+		}
 	}
-	return files, accessByFileID, nil
+	return nil
+}
+
+func (s *OptimizedMatchingService) fileVisibleToUser(ctx context.Context, userID, businessID string, file domain.PropertyFile, accessCache map[string]map[string]domain.ChannelVault) bool {
+	if file.OwnerUserID == userID {
+		return true
+	}
+	if len(file.VaultIDs) == 0 {
+		return false
+	}
+	vaults, ok := accessCache[userID]
+	if !ok {
+		accessibleVaults, _, err := s.accessibleVaultsForUser(ctx, businessID, userID)
+		if err != nil {
+			return false
+		}
+		vaults = accessibleVaults
+		accessCache[userID] = vaults
+	}
+	for _, vaultID := range file.VaultIDs {
+		if _, ok := vaults[vaultID]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func propertyMatchAccessForFile(file domain.PropertyFile, userID string, accessibleVaults map[string]domain.ChannelVault) []domain.PropertyMatchAccess {

@@ -21,11 +21,20 @@ type Event struct {
 	Payload     interface{} `json:"payload,omitempty"`
 }
 
-const SearchInvalidateEvent = "search.invalidate"
+const (
+	SearchInvalidateEvent = "search.invalidate"
+	PropertyChangedEvent  = "property.changed"
+)
 
 type SearchInvalidatePayload struct {
 	BusinessID string `json:"businessId"`
 	UserID     string `json:"userId"`
+}
+
+type PropertyChangedPayload struct {
+	BusinessID string `json:"businessId"`
+	UserID     string `json:"userId"`
+	PropertyID string `json:"propertyId"`
 }
 
 type NoopPublisher struct{}
