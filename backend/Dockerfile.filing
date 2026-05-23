@@ -1,0 +1,12 @@
+FROM golang:1.25-alpine AS build
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -o /bin/amlak-filing ./cmd/filing
+
+FROM alpine:3.22
+WORKDIR /app
+COPY --from=build /bin/amlak-filing /usr/local/bin/amlak-filing
+EXPOSE 8093
+CMD ["amlak-filing"]

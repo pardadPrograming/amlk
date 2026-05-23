@@ -1,0 +1,12 @@
+FROM golang:1.25-alpine AS build
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -o /bin/amlak-messaging ./cmd/messaging
+
+FROM alpine:3.22
+WORKDIR /app
+COPY --from=build /bin/amlak-messaging /usr/local/bin/amlak-messaging
+EXPOSE 8092
+CMD ["amlak-messaging"]

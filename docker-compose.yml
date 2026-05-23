@@ -1,0 +1,165 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - ./backend/.env.example
+    environment:
+      HTTP_ADDR: :8080
+      SEARCH_SERVICE_ADDR: search:8091
+      SEARCH_SERVICE_TOKEN: dev-search-token
+      MESSAGING_SERVICE_URL: http://messaging:8092
+      FILING_SERVICE_URL: http://filing:8093
+      FILE_SERVICE_URL: http://file-service:8095
+      MEDIA_OPTIMIZER_URL: http://media-optimizer:8094
+      MONGO_URI: mongodb://mongo:27017
+      REDIS_ADDR: redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      S3_ENDPOINT: http://minio:9000
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mongo
+      - redis
+      - search
+      - messaging
+      - filing
+      - file-service
+      - media-optimizer
+      - minio
+      - rabbitmq
+    volumes:
+      - object_data:/app/storage/objects
+
+  search:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.search
+    env_file:
+      - ./backend/.env.example
+    environment:
+      SEARCH_ADDR: :8091
+      SEARCH_SERVICE_TOKEN: dev-search-token
+      SEARCH_INDEX_TTL_SECONDS: 30
+      MONGO_URI: mongodb://mongo:27017
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    ports:
+      - "8091:8091"
+    depends_on:
+      - mongo
+      - rabbitmq
+
+  messaging:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.messaging
+    env_file:
+      - ./backend/.env.example
+    environment:
+      MESSAGING_ADDR: :8092
+      MONGO_URI: mongodb://mongo:27017
+      OBJECT_STORAGE_DIR: storage/objects
+      MEDIA_OPTIMIZER_URL: http://media-optimizer:8094
+    ports:
+      - "8092:8092"
+    depends_on:
+      - mongo
+      - media-optimizer
+    volumes:
+      - object_data:/app/storage/objects
+
+  filing:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.filing
+    env_file:
+      - ./backend/.env.example
+    environment:
+      FILING_ADDR: :8093
+      MONGO_URI: mongodb://mongo:27017
+      OBJECT_STORAGE_DIR: storage/objects
+      MEDIA_OPTIMIZER_URL: http://media-optimizer:8094
+    ports:
+      - "8093:8093"
+    depends_on:
+      - mongo
+      - media-optimizer
+    volumes:
+      - object_data:/app/storage/objects
+
+  realtime:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.realtime
+    env_file:
+      - ./backend/.env.example
+    environment:
+      REALTIME_ADDR: :8090
+      REDIS_ADDR: redis:6379
+    ports:
+      - "8090:8090"
+    depends_on:
+      - redis
+
+  file-service:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.file-service
+    env_file:
+      - ./backend/.env.example
+    environment:
+      FILE_SERVICE_ADDR: :8095
+      MONGO_URI: mongodb://mongo:27017
+      OBJECT_STORAGE_DIR: storage/objects
+    ports:
+      - "8095:8095"
+    depends_on:
+      - mongo
+    volumes:
+      - object_data:/app/storage/objects
+
+  media-optimizer:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.media-optimizer
+    env_file:
+      - ./backend/.env.example
+    environment:
+      MEDIA_OPTIMIZER_ADDR: :8094
+    ports:
+      - "8094:8094"
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+volumes:
+  mongo_data:
+  minio_data:
+  object_data:

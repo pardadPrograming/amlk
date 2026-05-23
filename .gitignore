@@ -1,0 +1,71 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# Logs and runtime output
+*.log
+*.err.log
+*.out.log
+logs/
+tmp/
+temp/
+
+# Backend local storage and binaries
+backend/storage/
+/storage/
+objects/
+*.exe
+*.test
+*.prof
+coverage.out
+
+# Go workspace/cache artifacts
+vendor/
+
+# Flutter/Dart
+**/.dart_tool/
+**/.packages
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/build/
+**/coverage/
+**/.pub-cache/
+**/.pub/
+
+# Flutter generated local config
+frontend/android/local.properties
+frontend/ios/Flutter/Generated.xcconfig
+frontend/ios/Flutter/flutter_export_environment.sh
+frontend/ios/Flutter/ephemeral/
+frontend/macos/Flutter/Generated.xcconfig
+frontend/macos/Flutter/flutter_export_environment.sh
+frontend/macos/Flutter/ephemeral/
+frontend/linux/flutter/ephemeral/
+frontend/windows/flutter/ephemeral/
+
+# Native dependency managers
+frontend/ios/Pods/
+frontend/macos/Pods/
+frontend/ios/.symlinks/
+frontend/macos/.symlinks/
+
+# IDE/editor local files
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Test and tooling cache
+.scannerwork/
+.nyc_output/
+node_modules/
