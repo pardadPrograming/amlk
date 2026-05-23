@@ -73,6 +73,7 @@ type Store interface {
 	UpdateChannelMessage(ctx context.Context, message domain.ChannelMessage) (domain.ChannelMessage, error)
 	DeleteChannelMessage(ctx context.Context, channelID string, messageID string) error
 	ListChannelMessages(ctx context.Context, channelID string, limit int, offset int) ([]domain.ChannelMessage, int, error)
+	ChannelUnreadSummary(ctx context.Context, channelID string, userID string) (domain.ChannelUnreadSummary, error)
 	MarkChannelMessagesSeen(ctx context.Context, channelID string, userID string, messageIDs []string) error
 	CreateChannelVaultFile(ctx context.Context, file domain.ChannelVaultFile) (domain.ChannelVaultFile, error)
 	UpsertChannelVaultFile(ctx context.Context, file domain.ChannelVaultFile) (domain.ChannelVaultFile, error)
@@ -93,6 +94,7 @@ type Store interface {
 	CreatePropertyFile(ctx context.Context, file domain.PropertyFile) (domain.PropertyFile, error)
 	ListPropertyFiles(ctx context.Context, businessID string) ([]domain.PropertyFile, error)
 	ListPropertyFilesForOwner(ctx context.Context, businessID string, ownerUserID string) ([]domain.PropertyFile, error)
+	ListPropertyFilesForAccess(ctx context.Context, businessID string, ownerUserID string, vaultIDs []string) ([]domain.PropertyFile, error)
 	ListLatestPropertyFiles(ctx context.Context, businessID string, ownerUserID string, vaultIDs []string, propertyType domain.PropertyFileType, limit int, offset int) ([]domain.PropertyFile, int, error)
 	GetPropertyFile(ctx context.Context, businessID string, fileID string) (domain.PropertyFile, error)
 	UpdatePropertyFile(ctx context.Context, file domain.PropertyFile) (domain.PropertyFile, error)

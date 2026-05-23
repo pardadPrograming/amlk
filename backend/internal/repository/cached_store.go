@@ -373,6 +373,10 @@ func (s *CachedStore) ListChannelMessages(ctx context.Context, channelID string,
 	return s.primary.ListChannelMessages(ctx, channelID, limit, offset)
 }
 
+func (s *CachedStore) ChannelUnreadSummary(ctx context.Context, channelID string, userID string) (domain.ChannelUnreadSummary, error) {
+	return s.primary.ChannelUnreadSummary(ctx, channelID, userID)
+}
+
 func (s *CachedStore) MarkChannelMessagesSeen(ctx context.Context, channelID string, userID string, messageIDs []string) error {
 	return s.primary.MarkChannelMessagesSeen(ctx, channelID, userID, messageIDs)
 }
@@ -459,6 +463,10 @@ func (s *CachedStore) ListPropertyFiles(ctx context.Context, businessID string) 
 
 func (s *CachedStore) ListPropertyFilesForOwner(ctx context.Context, businessID string, ownerUserID string) ([]domain.PropertyFile, error) {
 	return s.primary.ListPropertyFilesForOwner(ctx, businessID, ownerUserID)
+}
+
+func (s *CachedStore) ListPropertyFilesForAccess(ctx context.Context, businessID string, ownerUserID string, vaultIDs []string) ([]domain.PropertyFile, error) {
+	return s.primary.ListPropertyFilesForAccess(ctx, businessID, ownerUserID, vaultIDs)
 }
 
 func (s *CachedStore) ListLatestPropertyFiles(ctx context.Context, businessID string, ownerUserID string, vaultIDs []string, propertyType domain.PropertyFileType, limit int, offset int) ([]domain.PropertyFile, int, error) {

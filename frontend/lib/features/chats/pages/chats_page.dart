@@ -270,11 +270,13 @@ class _ChatThreadSheet extends StatefulWidget {
 class _ChatThreadSheetState extends State<_ChatThreadSheet> {
   final controller = Get.find<ChatsController>();
   final textController = TextEditingController();
+  final messagesScrollController = ScrollController();
   late final ClipboardFilePasteDisposer disposePasteListener;
 
   @override
   void initState() {
     super.initState();
+    messagesScrollController.addListener(_handleMessageScroll);
     controller.loadThread(widget.channelId);
     disposePasteListener = listenForClipboardFiles(
       (files) => controller.pasteFiles(widget.channelId, files),
@@ -284,8 +286,23 @@ class _ChatThreadSheetState extends State<_ChatThreadSheet> {
   @override
   void dispose() {
     disposePasteListener();
+    messagesScrollController.removeListener(_handleMessageScroll);
+    messagesScrollController.dispose();
     textController.dispose();
     super.dispose();
+  }
+
+  void _handleMessageScroll() {
+    if (!messagesScrollController.hasClients) {
+      return;
+    }
+    final position = messagesScrollController.position;
+    if (position.pixels >= position.maxScrollExtent - 120) {
+      controller.loadOlderMessages(widget.channelId);
+    }
+    if (position.pixels <= 80) {
+      controller.loadNewerMessages(widget.channelId);
+    }
   }
 
   Future<void> _pickAndSend() async {
@@ -663,6 +680,9 @@ class _ChatThreadSheetState extends State<_ChatThreadSheet> {
           const Divider(height: 1),
           Expanded(
             child: Obx(() {
+              if (controller.threadLoading.value) {
+                return const Center(child: CircularProgressIndicator());
+              }
               final messages = controller.threadMessages;
               if (messages.isEmpty) {
                 return const Center(
@@ -670,6 +690,7 @@ class _ChatThreadSheetState extends State<_ChatThreadSheet> {
                 );
               }
               return ListView.builder(
+                controller: messagesScrollController,
                 reverse: true,
                 padding: const EdgeInsets.all(12),
                 itemCount: messages.length,
@@ -685,134 +706,152 @@ class _ChatThreadSheetState extends State<_ChatThreadSheet> {
                   final authorName = member == null
                       ? message.authorName
                       : controller.memberTitle(member);
-                  return Align(
-                    alignment: isMine
-                        ? AlignmentDirectional.centerEnd
-                        : AlignmentDirectional.centerStart,
-                    child: Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(10),
-                      constraints: const BoxConstraints(maxWidth: 520),
-                      decoration: BoxDecoration(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (canModify)
-                            Align(
-                              alignment: AlignmentDirectional.centerEnd,
-                              child: PopupMenuButton<String>(
-                                tooltip: 'گزینه‌های پیام',
-                                icon: const Icon(Icons.more_horiz_rounded),
-                                onSelected: (value) {
-                                  if (value == 'edit') {
-                                    _editMessage(message);
-                                  } else if (value == 'delete') {
-                                    _deleteMessage(message);
-                                  }
-                                },
-                                itemBuilder: (context) => const [
-                                  PopupMenuItem(
-                                    value: 'edit',
-                                    child: ListTile(
-                                      leading: Icon(Icons.edit_outlined),
-                                      title: Text('ویرایش'),
+                  final showUnreadDivider =
+                      controller.firstUnreadMessageId.value == message.id &&
+                      controller.threadUnreadCount.value > 0;
+                  return Column(
+                    children: [
+                      if (showUnreadDivider)
+                        _UnreadMessagesDivider(
+                          count: controller.threadUnreadCount.value,
+                        ),
+                      Align(
+                        alignment: isMine
+                            ? AlignmentDirectional.centerEnd
+                            : AlignmentDirectional.centerStart,
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(10),
+                          constraints: const BoxConstraints(maxWidth: 520),
+                          decoration: BoxDecoration(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (canModify)
+                                Align(
+                                  alignment: AlignmentDirectional.centerEnd,
+                                  child: PopupMenuButton<String>(
+                                    tooltip: 'گزینه‌های پیام',
+                                    icon: const Icon(Icons.more_horiz_rounded),
+                                    onSelected: (value) {
+                                      if (value == 'edit') {
+                                        _editMessage(message);
+                                      } else if (value == 'delete') {
+                                        _deleteMessage(message);
+                                      }
+                                    },
+                                    itemBuilder: (context) => const [
+                                      PopupMenuItem(
+                                        value: 'edit',
+                                        child: ListTile(
+                                          leading: Icon(Icons.edit_outlined),
+                                          title: Text('ویرایش'),
+                                        ),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'delete',
+                                        child: ListTile(
+                                          leading: Icon(Icons.delete_outline),
+                                          title: Text('حذف'),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              if (!isMine && authorName.isNotEmpty)
+                                InkWell(
+                                  borderRadius: BorderRadius.circular(6),
+                                  onTap: member == null
+                                      ? null
+                                      : () => _showMemberProfile(member),
+                                  child: Padding(
+                                    padding: const EdgeInsetsDirectional.only(
+                                      bottom: 2,
+                                      end: 6,
                                     ),
-                                  ),
-                                  PopupMenuItem(
-                                    value: 'delete',
-                                    child: ListTile(
-                                      leading: Icon(Icons.delete_outline),
-                                      title: Text('حذف'),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          if (!isMine && authorName.isNotEmpty)
-                            InkWell(
-                              borderRadius: BorderRadius.circular(6),
-                              onTap: member == null
-                                  ? null
-                                  : () => _showMemberProfile(member),
-                              child: Padding(
-                                padding: const EdgeInsetsDirectional.only(
-                                  bottom: 2,
-                                  end: 6,
-                                ),
-                                child: Text(
-                                  authorName,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    color: member == null
-                                        ? null
-                                        : Theme.of(
-                                            context,
-                                          ).colorScheme.secondary,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (message.text.isNotEmpty) Text(message.text),
-                          if (message.caption.isNotEmpty) Text(message.caption),
-                          if (message.vaultFileRef != null)
-                            Container(
-                              margin: const EdgeInsets.only(top: 6),
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                border: Border.all(
-                                  color: Theme.of(context).dividerColor,
-                                ),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    _vaultFileIcon(message.vaultFileRef!.kind),
-                                    size: 18,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Flexible(
                                     child: Text(
-                                      message.vaultFileRef!.title.isEmpty
-                                          ? 'فایل صندوقچه'
-                                          : message.vaultFileRef!.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
+                                      authorName,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        color: member == null
+                                            ? null
+                                            : Theme.of(
+                                                context,
+                                              ).colorScheme.secondary,
+                                      ),
                                     ),
                                   ),
-                                ],
-                              ),
-                            ),
-                          for (final media in message.media)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Text(
-                                '${media.kind} - ${(media.size / 1024).ceil()} KB',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ),
-                          if (isMine)
-                            Align(
-                              alignment: AlignmentDirectional.centerEnd,
-                              child: Icon(
-                                isSeen
-                                    ? Icons.done_all_rounded
-                                    : Icons.done_rounded,
-                                size: 18,
-                                color: isSeen
-                                    ? Theme.of(context).colorScheme.secondary
-                                    : Theme.of(context).hintColor,
-                              ),
-                            ),
-                        ],
+                                ),
+                              if (message.text.isNotEmpty) Text(message.text),
+                              if (message.caption.isNotEmpty)
+                                Text(message.caption),
+                              if (message.vaultFileRef != null)
+                                Container(
+                                  margin: const EdgeInsets.only(top: 6),
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    border: Border.all(
+                                      color: Theme.of(context).dividerColor,
+                                    ),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        _vaultFileIcon(
+                                          message.vaultFileRef!.kind,
+                                        ),
+                                        size: 18,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Flexible(
+                                        child: Text(
+                                          message.vaultFileRef!.title.isEmpty
+                                              ? 'فایل صندوقچه'
+                                              : message.vaultFileRef!.title,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              for (final media in message.media)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 6),
+                                  child: Text(
+                                    '${media.kind} - ${(media.size / 1024).ceil()} KB',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodySmall,
+                                  ),
+                                ),
+                              if (isMine)
+                                Align(
+                                  alignment: AlignmentDirectional.centerEnd,
+                                  child: Icon(
+                                    isSeen
+                                        ? Icons.done_all_rounded
+                                        : Icons.done_rounded,
+                                    size: 18,
+                                    color: isSeen
+                                        ? Theme.of(
+                                            context,
+                                          ).colorScheme.secondary
+                                        : Theme.of(context).hintColor,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
                   );
                 },
               );
@@ -861,6 +900,42 @@ class _ChatThreadSheetState extends State<_ChatThreadSheet> {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UnreadMessagesDivider extends StatelessWidget {
+  const _UnreadMessagesDivider({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.secondary;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          Expanded(child: Divider(color: color.withValues(alpha: 0.45))),
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              '$count پیام خوانده‌نشده',
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w800,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          Expanded(child: Divider(color: color.withValues(alpha: 0.45))),
         ],
       ),
     );

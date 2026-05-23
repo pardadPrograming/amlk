@@ -255,6 +255,12 @@ class _RequestHistoryThreadState extends State<_RequestHistoryThread> {
 
   String get _matchKey => '${widget.contactId}:${widget.request.id}';
 
+  @override
+  void initState() {
+    super.initState();
+    _loadMatches();
+  }
+
   void _loadMatches() {
     if (_loaded || widget.request.id.isEmpty) return;
     _loaded = true;
@@ -473,6 +479,7 @@ class _MatchCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = _matchColor(match.tier);
     final file = match.propertyFile;
+    final vaultAccess = match.access.where((item) => item.isVault).toList();
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(10),
@@ -513,6 +520,15 @@ class _MatchCard extends StatelessWidget {
                 Chip(label: Text('Ã˜Â±Ã™â€¡Ã™â€  ${file.depositPrice}')),
               if (file.rentPrice > 0)
                 Chip(label: Text('Ã˜Â§Ã˜Â¬Ã˜Â§Ã˜Â±Ã™â€¡ ${file.rentPrice}')),
+              for (final access in vaultAccess)
+                Chip(
+                  avatar: const Icon(Icons.inventory_2_outlined, size: 16),
+                  label: Text(
+                    access.vaultTitle.isEmpty
+                        ? 'صندوقچه'
+                        : 'صندوقچه ${access.vaultTitle}',
+                  ),
+                ),
               ...match.matchedReasons
                   .take(3)
                   .map((reason) => Chip(label: Text(reason))),
@@ -526,6 +542,24 @@ class _MatchCard extends StatelessWidget {
                   ),
             ],
           ),
+          if (vaultAccess.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: vaultAccess
+                  .map(
+                    (access) => Chip(
+                      visualDensity: VisualDensity.compact,
+                      avatar: const Icon(Icons.percent_rounded, size: 16),
+                      label: Text(
+                        '${_formatPercent(access.commissionPercent)} درصد کمیسیون برای بیننده',
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ],
         ],
       ),
     );
@@ -537,6 +571,13 @@ Color _matchColor(String tier) => switch (tier) {
   'orange' => const Color(0xFFFF8A00),
   _ => const Color(0xFFE0B323),
 };
+
+String _formatPercent(double value) {
+  if (value == value.roundToDouble()) {
+    return value.toInt().toString();
+  }
+  return value.toStringAsFixed(1);
+}
 
 class _StatusPill extends StatelessWidget {
   const _StatusPill({required this.status});

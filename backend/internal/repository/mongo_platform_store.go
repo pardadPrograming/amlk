@@ -379,6 +379,17 @@ func (s *MongoPlatformStore) ListPropertyFilesForOwner(ctx context.Context, busi
 	})
 }
 
+func (s *MongoPlatformStore) ListPropertyFilesForAccess(ctx context.Context, businessID string, ownerUserID string, vaultIDs []string) ([]domain.PropertyFile, error) {
+	visibility := bson.A{bson.M{"ownerUserId": ownerUserID}}
+	if len(vaultIDs) > 0 {
+		visibility = append(visibility, bson.M{"vaultIds": bson.M{"$in": vaultIDs}})
+	}
+	return findStoredDataWithOptions[domain.PropertyFile](ctx, s.db.Collection("property_files"), bson.M{
+		"businessId": businessID,
+		"$or":        visibility,
+	}, options.Find().SetSort(bson.D{{Key: "updatedAt", Value: -1}}))
+}
+
 func (s *MongoPlatformStore) ListLatestPropertyFiles(ctx context.Context, businessID string, ownerUserID string, vaultIDs []string, propertyType domain.PropertyFileType, limit int, offset int) ([]domain.PropertyFile, int, error) {
 	if limit <= 0 {
 		limit = 30
@@ -870,6 +881,47 @@ func (s *MongoPlatformStore) ListChannelMessages(ctx context.Context, channelID 
 		return nil, 0, err
 	}
 	return items, int(total), nil
+}
+
+func (s *MongoPlatformStore) ChannelUnreadSummary(ctx context.Context, channelID string, userID string) (domain.ChannelUnreadSummary, error) {
+	if userID == "" {
+		return domain.ChannelUnreadSummary{}, nil
+	}
+	collection := s.db.Collection("channel_messages")
+	filter := bson.M{
+		"channelId":     channelID,
+		"authorId":      bson.M{"$ne": userID},
+		"seenBy.userId": bson.M{"$ne": userID},
+	}
+	unreadCount, err := collection.CountDocuments(ctx, filter)
+	if err != nil {
+		return domain.ChannelUnreadSummary{}, mongoErr(err)
+	}
+	if unreadCount == 0 {
+		return domain.ChannelUnreadSummary{}, nil
+	}
+	items, err := findStoredDataWithOptions[domain.ChannelMessage](ctx, collection, filter, options.Find().
+		SetSort(bson.D{{Key: "createdAt", Value: 1}}).
+		SetLimit(1))
+	if err != nil {
+		return domain.ChannelUnreadSummary{}, err
+	}
+	if len(items) == 0 {
+		return domain.ChannelUnreadSummary{}, nil
+	}
+	firstUnread := items[0]
+	newerCount, err := collection.CountDocuments(ctx, bson.M{
+		"channelId": channelID,
+		"createdAt": bson.M{"$gt": firstUnread.CreatedAt},
+	})
+	if err != nil {
+		return domain.ChannelUnreadSummary{}, mongoErr(err)
+	}
+	return domain.ChannelUnreadSummary{
+		UnreadCount:          int(unreadCount),
+		FirstUnreadOffset:    int(newerCount),
+		FirstUnreadMessageID: firstUnread.ID,
+	}, nil
 }
 
 func (s *MongoPlatformStore) MarkChannelMessagesSeen(ctx context.Context, channelID string, userID string, messageIDs []string) error {

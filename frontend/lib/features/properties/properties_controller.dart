@@ -214,6 +214,29 @@ class PropertiesController extends GetxController {
     }
   }
 
+  Future<void> markNotificationRead(NotificationModel notification) async {
+    try {
+      await _api.dio.post('/notifications/${notification.id}/read');
+      final index = notifications.indexWhere(
+        (item) => item.id == notification.id,
+      );
+      if (index >= 0) {
+        notifications[index] = NotificationModel(
+          id: notification.id,
+          type: notification.type,
+          title: notification.title,
+          body: notification.body,
+          businessId: notification.businessId,
+          propertyId: notification.propertyId,
+          requestId: notification.requestId,
+          readAt: DateTime.now().toUtc().toIso8601String(),
+        );
+      }
+    } catch (e) {
+      Get.snackbar('خطا', _api.message(e));
+    }
+  }
+
   Future<void> loadVaults() async {
     final businessId = _businessId;
     final combined = <String, ChannelVaultModel>{};

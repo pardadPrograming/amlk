@@ -30,6 +30,16 @@ class ChatsController extends GetxController {
   final vaultFiles = <ChannelVaultFileModel>[].obs;
   final contactCategories = <String>[].obs;
   final sending = false.obs;
+  final threadLoading = false.obs;
+  final loadingOlderMessages = false.obs;
+  final loadingNewerMessages = false.obs;
+  final threadUnreadCount = 0.obs;
+  final firstUnreadMessageId = ''.obs;
+  final hasOlderMessages = false.obs;
+  final hasNewerMessages = false.obs;
+  int _threadOffset = 0;
+  int _threadTotal = 0;
+  static const int _messagePageLimit = 30;
 
   String? get _businessId => Get.find<BusinessController>().selected.value?.id;
   String get currentUserId => Get.find<AuthController>().user.value?.id ?? '';
@@ -182,13 +192,47 @@ class ChatsController extends GetxController {
   String memberTitle(ChannelMemberModel member) =>
       member.displayName.isEmpty ? member.phone : member.displayName;
 
-  Future<void> loadMessages(String channelId) async {
-    final res = await _api.dio.get('/channels/$channelId/messages');
-    threadMessages.assignAll(
-      (res.data['data'] as List? ?? const []).map(
-        (e) => ChannelMessageModel.fromJson(Map<String, dynamic>.from(e)),
-      ),
+  Future<void> loadMessages(
+    String channelId, {
+    bool fromUnread = false,
+    int? offset,
+    bool appendOlder = false,
+    bool prependNewer = false,
+  }) async {
+    final res = await _api.dio.get(
+      '/channels/$channelId/messages',
+      queryParameters: {
+        'limit': _messagePageLimit,
+        'window': true,
+        if (fromUnread) 'fromUnread': true,
+        'offset': ?offset,
+      },
     );
+    final data = res.data['data'];
+    final page = data is Map ? Map<String, dynamic>.from(data) : {};
+    final rawItems = page['items'] as List? ?? const [];
+    final items = rawItems
+        .map((e) => ChannelMessageModel.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+    _threadTotal = (page['total'] as num? ?? items.length).toInt();
+    if (!appendOlder && !prependNewer) {
+      threadUnreadCount.value = (page['unreadCount'] as num? ?? 0).toInt();
+      firstUnreadMessageId.value =
+          page['firstUnreadMessageId']?.toString() ?? '';
+    }
+    if (appendOlder) {
+      _appendMessages(items);
+    } else if (prependNewer) {
+      _prependMessages(items);
+      _threadOffset = (page['offset'] as num? ?? 0).toInt();
+    } else {
+      threadMessages.assignAll(items);
+      _threadOffset = (page['offset'] as num? ?? 0).toInt();
+    }
+    hasOlderMessages.value =
+        (page['hasOlder'] as bool?) ??
+        _threadOffset + threadMessages.length < _threadTotal;
+    hasNewerMessages.value = (page['hasNewer'] as bool?) ?? _threadOffset > 0;
   }
 
   Future<void> loadMembers(String channelId) async {
@@ -201,7 +245,48 @@ class ChatsController extends GetxController {
   }
 
   Future<void> loadThread(String channelId) async {
-    await Future.wait([loadMessages(channelId), loadMembers(channelId)]);
+    threadLoading.value = true;
+    try {
+      await Future.wait([
+        loadMessages(channelId, fromUnread: true),
+        loadMembers(channelId),
+      ]);
+    } finally {
+      threadLoading.value = false;
+    }
+  }
+
+  Future<void> loadOlderMessages(String channelId) async {
+    if (loadingOlderMessages.value || !hasOlderMessages.value) {
+      return;
+    }
+    loadingOlderMessages.value = true;
+    try {
+      await loadMessages(
+        channelId,
+        offset: _threadOffset + threadMessages.length,
+        appendOlder: true,
+      );
+    } finally {
+      loadingOlderMessages.value = false;
+    }
+  }
+
+  Future<void> loadNewerMessages(String channelId) async {
+    if (loadingNewerMessages.value || !hasNewerMessages.value) {
+      return;
+    }
+    loadingNewerMessages.value = true;
+    try {
+      final nextOffset = _threadOffset - _messagePageLimit;
+      await loadMessages(
+        channelId,
+        offset: nextOffset < 0 ? 0 : nextOffset,
+        prependNewer: true,
+      );
+    } finally {
+      loadingNewerMessages.value = false;
+    }
   }
 
   Future<void> loadVaultFiles(String channelId) async {
@@ -326,7 +411,7 @@ class ChatsController extends GetxController {
           if (vaultFileRefId.isNotEmpty) 'vaultFileRefId': vaultFileRefId,
         },
       );
-      await loadMessages(channelId);
+      await loadMessages(channelId, offset: 0);
     } finally {
       sending.value = false;
     }
@@ -382,7 +467,7 @@ class ChatsController extends GetxController {
         '/channels/$channelId/messages',
         data: {'media': media.map((item) => item.toJson()).toList()},
       );
-      await loadMessages(channelId);
+      await loadMessages(channelId, offset: 0);
       Get.snackbar(
         'فایل ارسال شد',
         '${files.length} فایل از کلیپ‌بورد ارسال شد.',
@@ -399,6 +484,16 @@ class ChatsController extends GetxController {
     ChannelVaultFileModel file,
   ) async {
     await sendMessage(channelId, vaultFileRefId: file.id);
+  }
+
+  void _appendMessages(List<ChannelMessageModel> items) {
+    final seen = threadMessages.map((item) => item.id).toSet();
+    threadMessages.addAll(items.where((item) => seen.add(item.id)));
+  }
+
+  void _prependMessages(List<ChannelMessageModel> items) {
+    final seen = threadMessages.map((item) => item.id).toSet();
+    threadMessages.insertAll(0, items.where((item) => seen.add(item.id)));
   }
 }
 

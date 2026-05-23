@@ -247,14 +247,24 @@ func (s *ChannelService) Members(ctx context.Context, userID, channelID string) 
 	return s.enrichChannelMembers(ctx, members), nil
 }
 
-func (s *ChannelService) Messages(ctx context.Context, userID, channelID string, limit, offset int) ([]domain.ChannelMessage, int, error) {
+func (s *ChannelService) Messages(ctx context.Context, userID, channelID string, limit, offset int, fromUnread bool) (domain.ChannelMessagePage, error) {
 	if _, err := s.authorizeRead(ctx, userID, channelID); err != nil {
-		return nil, 0, err
+		return domain.ChannelMessagePage{}, err
 	}
 	limit, offset = normalizeChannelPage(limit, offset)
+	summary, err := s.store.ChannelUnreadSummary(ctx, channelID, userID)
+	if err != nil {
+		return domain.ChannelMessagePage{}, err
+	}
+	if fromUnread && summary.UnreadCount > 0 {
+		offset = summary.FirstUnreadOffset - 5
+		if offset < 0 {
+			offset = 0
+		}
+	}
 	items, total, err := s.store.ListChannelMessages(ctx, channelID, limit, offset)
 	if err != nil {
-		return nil, 0, err
+		return domain.ChannelMessagePage{}, err
 	}
 	messageIDs := make([]string, 0, len(items))
 	for _, item := range items {
@@ -270,7 +280,17 @@ func (s *ChannelService) Messages(ctx context.Context, userID, channelID string,
 			}
 		}
 	}
-	return items, total, nil
+	return domain.ChannelMessagePage{
+		Items:                items,
+		Total:                total,
+		Limit:                limit,
+		Offset:               offset,
+		UnreadCount:          summary.UnreadCount,
+		FirstUnreadOffset:    summary.FirstUnreadOffset,
+		FirstUnreadMessageID: summary.FirstUnreadMessageID,
+		HasOlder:             offset+len(items) < total,
+		HasNewer:             offset > 0,
+	}, nil
 }
 
 func (s *ChannelService) SendMessage(ctx context.Context, user domain.User, channelID string, input domain.ChannelMessage) (domain.ChannelMessage, error) {

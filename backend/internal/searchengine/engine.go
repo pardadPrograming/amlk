@@ -36,6 +36,7 @@ type matchResultCache struct {
 type propertySearchIndex struct {
 	expiresAt       time.Time
 	files           []domain.PropertyFile
+	accessByFileID  map[string][]domain.PropertyMatchAccess
 	areaIDs         map[string][]int
 	streetIDs       map[string][]int
 	neighborhoodIDs map[string][]int
@@ -84,7 +85,7 @@ func (s *OptimizedMatchingService) RequestMatches(ctx context.Context, userID, b
 	if err != nil {
 		return MatchPage{}, err
 	}
-	results := sortMatchResults(scorePropertyCandidates(request, candidatePropertyFiles(index, request)))
+	results := sortMatchResults(scorePropertyCandidates(request, candidatePropertyFiles(index, request), index.accessByFileID))
 	s.storeCachedResults(cacheKey, results)
 	items := paginateMatches(results, limit, offset)
 	return MatchPage{Items: items, Total: len(results), Limit: limit, Offset: offset}, nil
@@ -173,11 +174,11 @@ func (s *OptimizedMatchingService) propertyIndex(ctx context.Context, businessID
 		return index, nil
 	}
 
-	files, err := s.store.ListPropertyFilesForOwner(ctx, businessID, userID)
+	files, accessByFileID, err := s.accessiblePropertyFiles(ctx, businessID, userID)
 	if err != nil {
 		return propertySearchIndex{}, err
 	}
-	index = buildPropertySearchIndex(files, now.Add(s.ttl))
+	index = buildPropertySearchIndex(files, accessByFileID, now.Add(s.ttl))
 
 	s.mu.Lock()
 	s.indexes[key] = index
@@ -185,10 +186,122 @@ func (s *OptimizedMatchingService) propertyIndex(ctx context.Context, businessID
 	return index, nil
 }
 
-func buildPropertySearchIndex(files []domain.PropertyFile, expiresAt time.Time) propertySearchIndex {
+func (s *OptimizedMatchingService) accessiblePropertyFiles(ctx context.Context, businessID, userID string) ([]domain.PropertyFile, map[string][]domain.PropertyMatchAccess, error) {
+	user, err := s.store.GetUser(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	businesses, err := s.store.ListBusinessesForUser(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	businessIDs := make([]string, 0, 1)
+	for _, business := range businesses {
+		if business.ID == businessID {
+			businessIDs = append(businessIDs, business.ID)
+			break
+		}
+	}
+	channels, err := s.store.ListChannelsForUser(ctx, userID, []string{user.Phone}, businessIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	accessibleVaults := map[string]domain.ChannelVault{}
+	accessibleVaultIDs := []string{}
+	for _, channel := range channels {
+		if channel.VaultID == "" {
+			continue
+		}
+		if channel.BusinessID != "" && channel.BusinessID != businessID {
+			continue
+		}
+		vault, err := s.store.GetChannelVault(ctx, channel.VaultID)
+		if err != nil {
+			continue
+		}
+		if _, exists := accessibleVaults[vault.ID]; !exists {
+			accessibleVaultIDs = append(accessibleVaultIDs, vault.ID)
+		}
+		accessibleVaults[vault.ID] = vault
+	}
+	if member, err := s.store.GetMemberByUser(ctx, businessID, userID); err == nil &&
+		(member.Role == domain.RoleOwner || member.Role == domain.RoleManager || domain.HasPermission(member, domain.PermBusinessUpdate)) {
+		if vaults, err := s.store.ListBusinessVaults(ctx, businessID); err == nil {
+			for _, vault := range vaults {
+				if vault.ID == "" {
+					continue
+				}
+				if _, exists := accessibleVaults[vault.ID]; !exists {
+					accessibleVaultIDs = append(accessibleVaultIDs, vault.ID)
+				}
+				accessibleVaults[vault.ID] = vault
+			}
+		}
+	}
+
+	allFiles, err := s.store.ListPropertyFilesForAccess(ctx, businessID, userID, accessibleVaultIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	files := make([]domain.PropertyFile, 0, len(allFiles))
+	accessByFileID := map[string][]domain.PropertyMatchAccess{}
+	for _, file := range allFiles {
+		access := propertyMatchAccessForFile(file, userID, accessibleVaults)
+		if len(access) == 0 {
+			continue
+		}
+		files = append(files, file)
+		accessByFileID[file.ID] = access
+	}
+	return files, accessByFileID, nil
+}
+
+func propertyMatchAccessForFile(file domain.PropertyFile, userID string, accessibleVaults map[string]domain.ChannelVault) []domain.PropertyMatchAccess {
+	result := []domain.PropertyMatchAccess{}
+	if file.OwnerUserID == userID {
+		source := "own"
+		if file.IsPartnershipCopy || file.SharedFromFileID != "" {
+			source = "collaboration"
+		}
+		result = append(result, domain.PropertyMatchAccess{
+			Source:        source,
+			Collaboration: source == "collaboration",
+		})
+	}
+	commissionByVault := map[string]float64{}
+	for _, placement := range file.VaultPlacements {
+		if placement.VaultID != "" {
+			commissionByVault[placement.VaultID] = placement.CommissionPercent
+		}
+	}
+	for _, vaultID := range file.VaultIDs {
+		vault, ok := accessibleVaults[vaultID]
+		if !ok {
+			continue
+		}
+		if file.OwnerUserID == userID || file.IsPartnershipCopy {
+			continue
+		}
+		title := strings.TrimSpace(vault.Title)
+		if title == "" {
+			title = "صندوقچه"
+		}
+		result = append(result, domain.PropertyMatchAccess{
+			Source:            "vault",
+			VaultID:           vault.ID,
+			VaultTitle:        title,
+			CommissionPercent: commissionByVault[vaultID],
+			Collaboration:     false,
+		})
+	}
+	return result
+}
+
+func buildPropertySearchIndex(files []domain.PropertyFile, accessByFileID map[string][]domain.PropertyMatchAccess, expiresAt time.Time) propertySearchIndex {
 	index := propertySearchIndex{
 		expiresAt:       expiresAt,
 		files:           make([]domain.PropertyFile, 0, len(files)),
+		accessByFileID:  accessByFileID,
 		areaIDs:         map[string][]int{},
 		streetIDs:       map[string][]int{},
 		neighborhoodIDs: map[string][]int{},
@@ -268,9 +381,9 @@ func candidateIndexesForLocation(index propertySearchIndex, location domain.Cont
 	}
 }
 
-func scorePropertyCandidates(request domain.ContactRequest, files []domain.PropertyFile) []domain.PropertyMatchResult {
+func scorePropertyCandidates(request domain.ContactRequest, files []domain.PropertyFile, accessByFileID map[string][]domain.PropertyMatchAccess) []domain.PropertyMatchResult {
 	if len(files) < 128 {
-		return scorePropertyChunk(request, files)
+		return scorePropertyChunk(request, files, accessByFileID)
 	}
 	workers := runtime.GOMAXPROCS(0)
 	if workers < 1 {
@@ -291,7 +404,7 @@ func scorePropertyCandidates(request domain.ContactRequest, files []domain.Prope
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			out <- scorePropertyChunk(request, chunk)
+			out <- scorePropertyChunk(request, chunk, accessByFileID)
 		}()
 	}
 	wg.Wait()
@@ -304,13 +417,14 @@ func scorePropertyCandidates(request domain.ContactRequest, files []domain.Prope
 	return results
 }
 
-func scorePropertyChunk(request domain.ContactRequest, files []domain.PropertyFile) []domain.PropertyMatchResult {
+func scorePropertyChunk(request domain.ContactRequest, files []domain.PropertyFile, accessByFileID map[string][]domain.PropertyMatchAccess) []domain.PropertyMatchResult {
 	results := make([]domain.PropertyMatchResult, 0, len(files))
 	for _, file := range files {
 		match := matchProperty(request, file)
 		if match.Score == 0 || match.Tier == "" {
 			continue
 		}
+		match.Access = accessByFileID[file.ID]
 		results = append(results, match)
 	}
 	return results

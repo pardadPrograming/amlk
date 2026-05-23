@@ -364,6 +364,11 @@ class DesktopSideNav extends StatelessWidget {
       route: AppRoutes.vaults,
     ),
     _NavItem(
+      title: 'صندوقچه پیام‌ها',
+      icon: Icons.inbox_outlined,
+      route: AppRoutes.inbox,
+    ),
+    _NavItem(
       title: 'مشاورین',
       icon: Icons.manage_accounts_outlined,
       route: AppRoutes.consultants,
@@ -414,16 +419,7 @@ class DesktopSideNav extends StatelessWidget {
               const SizedBox(height: 20),
               Expanded(
                 child: Obx(() {
-                  final items = [
-                    ..._baseItems.take(5),
-                    if (consultants.pendingInboxCount > 0)
-                      const _NavItem(
-                        title: 'دعوت‌نامه‌ها',
-                        icon: Icons.inbox_outlined,
-                        route: AppRoutes.inbox,
-                      ),
-                    ..._baseItems.skip(5),
-                  ];
+                  final items = _baseItems;
                   return ListView.separated(
                     itemCount: items.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 8),

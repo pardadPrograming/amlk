@@ -107,6 +107,24 @@ type ChannelMessage struct {
 	UpdatedAt      time.Time                `json:"updatedAt"`
 }
 
+type ChannelUnreadSummary struct {
+	UnreadCount          int    `json:"unreadCount"`
+	FirstUnreadOffset    int    `json:"firstUnreadOffset"`
+	FirstUnreadMessageID string `json:"firstUnreadMessageId,omitempty"`
+}
+
+type ChannelMessagePage struct {
+	Items                []ChannelMessage `json:"items"`
+	Total                int              `json:"total"`
+	Limit                int              `json:"limit"`
+	Offset               int              `json:"offset"`
+	UnreadCount          int              `json:"unreadCount"`
+	FirstUnreadOffset    int              `json:"firstUnreadOffset"`
+	FirstUnreadMessageID string           `json:"firstUnreadMessageId,omitempty"`
+	HasOlder             bool             `json:"hasOlder"`
+	HasNewer             bool             `json:"hasNewer"`
+}
+
 type ChannelMessageSeen struct {
 	UserID string    `json:"userId"`
 	SeenAt time.Time `json:"seenAt"`

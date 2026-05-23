@@ -968,6 +968,30 @@ func (s *MemoryStore) ListChannelMessages(ctx context.Context, channelID string,
 	return messages[offset:end], total, nil
 }
 
+func (s *MemoryStore) ChannelUnreadSummary(ctx context.Context, channelID string, userID string) (domain.ChannelUnreadSummary, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	messages := []domain.ChannelMessage{}
+	for _, message := range s.channelMessages {
+		if message.ChannelID == channelID {
+			messages = append(messages, message)
+		}
+	}
+	sort.SliceStable(messages, func(i, j int) bool {
+		return messages[i].CreatedAt.After(messages[j].CreatedAt)
+	})
+	summary := domain.ChannelUnreadSummary{}
+	for index, message := range messages {
+		if message.AuthorID == userID || messageSeenByUser(message, userID) {
+			continue
+		}
+		summary.UnreadCount++
+		summary.FirstUnreadOffset = index
+		summary.FirstUnreadMessageID = message.ID
+	}
+	return summary, nil
+}
+
 func (s *MemoryStore) MarkChannelMessagesSeen(ctx context.Context, channelID string, userID string, messageIDs []string) error {
 	if userID == "" || len(messageIDs) == 0 {
 		return nil
@@ -1004,6 +1028,15 @@ func (s *MemoryStore) MarkChannelMessagesSeen(ctx context.Context, channelID str
 		s.channelMessages[id] = message
 	}
 	return nil
+}
+
+func messageSeenByUser(message domain.ChannelMessage, userID string) bool {
+	for _, seen := range message.SeenBy {
+		if seen.UserID == userID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *MemoryStore) CreateChannelVaultFile(ctx context.Context, file domain.ChannelVaultFile) (domain.ChannelVaultFile, error) {
@@ -1259,6 +1292,27 @@ func (s *MemoryStore) ListPropertyFilesForOwner(ctx context.Context, businessID 
 	return result, nil
 }
 
+func (s *MemoryStore) ListPropertyFilesForAccess(ctx context.Context, businessID string, ownerUserID string, vaultIDs []string) ([]domain.PropertyFile, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	accessibleVaults := map[string]struct{}{}
+	for _, vaultID := range vaultIDs {
+		if vaultID != "" {
+			accessibleVaults[vaultID] = struct{}{}
+		}
+	}
+	var result []domain.PropertyFile
+	for _, file := range s.propertyFiles {
+		if file.BusinessID != businessID {
+			continue
+		}
+		if file.OwnerUserID == ownerUserID || propertyInVaults(file, accessibleVaults) {
+			result = append(result, file)
+		}
+	}
+	return result, nil
+}
+
 func (s *MemoryStore) ListLatestPropertyFiles(ctx context.Context, businessID string, ownerUserID string, vaultIDs []string, propertyType domain.PropertyFileType, limit int, offset int) ([]domain.PropertyFile, int, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1337,6 +1391,18 @@ func propertyFileHasType(file domain.PropertyFile, propertyType domain.PropertyF
 	}
 	for _, item := range file.Types {
 		if item == propertyType {
+			return true
+		}
+	}
+	return false
+}
+
+func propertyInVaults(file domain.PropertyFile, vaultIDs map[string]struct{}) bool {
+	if len(vaultIDs) == 0 {
+		return false
+	}
+	for _, vaultID := range file.VaultIDs {
+		if _, ok := vaultIDs[vaultID]; ok {
 			return true
 		}
 	}

@@ -666,6 +666,7 @@ class PropertyMatchResultModel {
     required this.tier,
     required this.matchedReasons,
     required this.missedReasons,
+    this.access = const [],
   });
 
   final PropertyFileModel propertyFile;
@@ -673,6 +674,7 @@ class PropertyMatchResultModel {
   final String tier;
   final List<String> matchedReasons;
   final List<String> missedReasons;
+  final List<PropertyMatchAccessModel> access;
 
   factory PropertyMatchResultModel.fromJson(Map<String, dynamic> json) =>
       PropertyMatchResultModel(
@@ -687,6 +689,41 @@ class PropertyMatchResultModel {
         missedReasons: (json['missedReasons'] as List? ?? const [])
             .map((e) => e.toString())
             .toList(),
+        access: (json['access'] as List? ?? const [])
+            .map(
+              (e) => PropertyMatchAccessModel.fromJson(
+                Map<String, dynamic>.from(e),
+              ),
+            )
+            .toList(),
+      );
+}
+
+class PropertyMatchAccessModel {
+  PropertyMatchAccessModel({
+    this.source = '',
+    this.vaultId = '',
+    this.vaultTitle = '',
+    this.commissionPercent = 0,
+    this.collaboration = false,
+  });
+
+  final String source;
+  final String vaultId;
+  final String vaultTitle;
+  final double commissionPercent;
+  final bool collaboration;
+
+  bool get isVault => source == 'vault';
+
+  factory PropertyMatchAccessModel.fromJson(Map<String, dynamic> json) =>
+      PropertyMatchAccessModel(
+        source: json['source']?.toString() ?? '',
+        vaultId: json['vaultId']?.toString() ?? '',
+        vaultTitle: json['vaultTitle']?.toString() ?? '',
+        commissionPercent:
+            double.tryParse(json['commissionPercent']?.toString() ?? '') ?? 0,
+        collaboration: json['collaboration'] == true,
       );
 }
 

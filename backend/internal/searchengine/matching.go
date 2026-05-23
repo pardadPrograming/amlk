@@ -1,15 +1,23 @@
 package searchengine
 
 import (
+	"math"
 	"strings"
 
 	"amlakcrm/backend/internal/domain"
+)
+
+const (
+	rentLeaseDepositStep = int64(100_000_000)
+	rentLeaseRentStep    = int64(3_000_000)
 )
 
 type matchCounter struct {
 	total   int
 	matched int
 	missed  int
+	soft    bool
+	hard    bool
 	reasons []string
 	misses  []string
 }
@@ -57,9 +65,12 @@ func matchProperty(request domain.ContactRequest, file domain.PropertyFile) doma
 		return domain.PropertyMatchResult{}
 	}
 	score := counter.matched * 100 / counter.total
+	if counter.hard && score < 80 {
+		return domain.PropertyMatchResult{}
+	}
 	tier := ""
 	switch {
-	case score == 100 && counter.missed == 0:
+	case score == 100 && counter.missed == 0 && !counter.soft:
 		tier = "green"
 	case score >= 80 && counter.missed > 0:
 		tier = "orange"
@@ -76,6 +87,10 @@ func matchProperty(request domain.ContactRequest, file domain.PropertyFile) doma
 		MatchedReasons: counter.reasons,
 		MissedReasons:  counter.misses,
 	}
+}
+
+func MatchProperty(request domain.ContactRequest, file domain.PropertyFile) domain.PropertyMatchResult {
+	return matchProperty(request, file)
 }
 
 func propertyTypeMatches(requestType string, fileTypes []domain.PropertyFileType, primary domain.PropertyFileType) bool {
@@ -97,18 +112,7 @@ func propertyTypeMatches(requestType string, fileTypes []domain.PropertyFileType
 func addFinancialMatch(counter *matchCounter, request domain.ContactRequest, file domain.PropertyFile) {
 	switch request.Type {
 	case "rent_lease":
-		if request.DepositMin > 0 {
-			counter.add(file.DepositPrice >= request.DepositMin, "رهن از حداقل درخواست بالاتر است", "رهن کمتر از حداقل درخواست است")
-		}
-		if request.DepositMax > 0 {
-			counter.add(file.DepositPrice <= request.DepositMax || (request.Convertible && file.Convertible), "رهن در بازه یا قابل تبدیل است", "رهن از سقف درخواست بیشتر است")
-		}
-		if request.RentMin > 0 {
-			counter.add(file.RentPrice >= request.RentMin, "اجاره از حداقل درخواست بالاتر است", "اجاره کمتر از حداقل درخواست است")
-		}
-		if request.RentMax > 0 {
-			counter.add(file.RentPrice <= request.RentMax, "اجاره در سقف درخواست است", "اجاره از سقف درخواست بیشتر است")
-		}
+		addRentLeaseFinancialMatch(counter, request, file)
 		if request.RentWithOwner {
 			counter.add(file.RentWithOwner, "همراه مالک بودن با درخواست سازگار است", "همراه مالک نیست")
 		}
@@ -132,6 +136,194 @@ func addFinancialMatch(counter *matchCounter, request domain.ContactRequest, fil
 			counter.add(price <= request.PurchaseMax, "قیمت در سقف درخواست است", "قیمت از سقف درخواست بیشتر است")
 		}
 	}
+}
+
+func addRentLeaseFinancialMatch(counter *matchCounter, request domain.ContactRequest, file domain.PropertyFile) {
+	preferred := rentLeaseRange{
+		depositMin: request.DepositMin,
+		depositMax: request.DepositMax,
+		rentMin:    request.RentMin,
+		rentMax:    request.RentMax,
+	}
+	suggested := rentLeaseRange{
+		depositMin: request.SuggestedDepositMin,
+		depositMax: request.SuggestedDepositMax,
+		rentMin:    request.SuggestedRentMin,
+		rentMax:    request.SuggestedRentMax,
+	}
+	if !preferred.active() && !suggested.active() {
+		return
+	}
+	pricing := rentLeasePricingForFile(file)
+	if pricing.matches(preferred) {
+		counter.add(true, "رهن و اجاره با بازه اصلی درخواست مچ است", "")
+		return
+	}
+	if pricing.matches(suggested) {
+		counter.soft = true
+		counter.add(true, "رهن و اجاره با بازه پیشنهادی مشاور مچ است", "")
+		return
+	}
+	counter.hard = true
+	counter.add(false, "", "رهن و اجاره با بازه اصلی یا پیشنهادی درخواست مچ نیست")
+}
+
+type rentLeaseRange struct {
+	depositMin int64
+	depositMax int64
+	rentMin    int64
+	rentMax    int64
+}
+
+func (r rentLeaseRange) active() bool {
+	return r.depositMin > 0 || r.depositMax > 0 || r.rentMin > 0 || r.rentMax > 0
+}
+
+func (r rentLeaseRange) contains(deposit, rent int64) bool {
+	if !r.active() {
+		return false
+	}
+	if r.depositMin > 0 && deposit < r.depositMin {
+		return false
+	}
+	if r.depositMax > 0 && deposit > r.depositMax {
+		return false
+	}
+	if r.rentMin > 0 && rent < r.rentMin {
+		return false
+	}
+	if r.rentMax > 0 && rent > r.rentMax {
+		return false
+	}
+	return true
+}
+
+type rentLeasePricing struct {
+	depositStart int64
+	rentStart    int64
+	depositEnd   int64
+	rentEnd      int64
+}
+
+func rentLeasePricingForFile(file domain.PropertyFile) rentLeasePricing {
+	pricing := rentLeasePricing{
+		depositStart: file.DepositPrice,
+		rentStart:    file.RentPrice,
+		depositEnd:   file.DepositPrice,
+		rentEnd:      file.RentPrice,
+	}
+	if !file.Convertible || file.MaxConvertibleDeposit <= file.DepositPrice {
+		return pricing
+	}
+	pricing.depositEnd = file.MaxConvertibleDeposit
+	pricing.rentEnd = convertedRent(file.RentPrice, file.MaxConvertibleDeposit-file.DepositPrice)
+	return pricing
+}
+
+func convertedRent(baseRent, depositIncrease int64) int64 {
+	if depositIncrease <= 0 {
+		return baseRent
+	}
+	reduction := depositIncrease * rentLeaseRentStep / rentLeaseDepositStep
+	if reduction >= baseRent {
+		return 0
+	}
+	return baseRent - reduction
+}
+
+func (p rentLeasePricing) matches(r rentLeaseRange) bool {
+	if !r.active() {
+		return false
+	}
+	if r.contains(p.depositStart, p.rentStart) || r.contains(p.depositEnd, p.rentEnd) {
+		return true
+	}
+	if p.depositStart == p.depositEnd {
+		return false
+	}
+	minDeposit, maxDeposit := int64Bounds(p.depositStart, p.depositEnd)
+	candidateMin := maxInt64(minDeposit, positiveOrMin(r.depositMin, minDeposit))
+	candidateMax := minInt64(maxDeposit, positiveOrMax(r.depositMax, maxDeposit))
+	if candidateMin > candidateMax {
+		return false
+	}
+	for _, deposit := range candidateDepositsForRentRange(p, r, candidateMin, candidateMax) {
+		if deposit < candidateMin || deposit > candidateMax {
+			continue
+		}
+		if r.contains(deposit, p.rentAt(deposit)) {
+			return true
+		}
+	}
+	return false
+}
+
+func candidateDepositsForRentRange(p rentLeasePricing, r rentLeaseRange, minDeposit, maxDeposit int64) []int64 {
+	candidates := []int64{minDeposit, maxDeposit, p.depositStart, p.depositEnd}
+	if r.rentMin > 0 {
+		candidates = append(candidates, p.depositAtRentBoundary(r.rentMin)...)
+	}
+	if r.rentMax > 0 {
+		candidates = append(candidates, p.depositAtRentBoundary(r.rentMax)...)
+	}
+	return candidates
+}
+
+func (p rentLeasePricing) rentAt(deposit int64) int64 {
+	if p.depositEnd == p.depositStart {
+		return p.rentStart
+	}
+	ratio := float64(deposit-p.depositStart) / float64(p.depositEnd-p.depositStart)
+	rent := float64(p.rentStart) + ratio*float64(p.rentEnd-p.rentStart)
+	if rent < 0 {
+		return 0
+	}
+	return int64(math.Round(rent))
+}
+
+func (p rentLeasePricing) depositAtRentBoundary(rent int64) []int64 {
+	if p.rentEnd == p.rentStart {
+		return nil
+	}
+	ratio := float64(rent-p.rentStart) / float64(p.rentEnd-p.rentStart)
+	deposit := float64(p.depositStart) + ratio*float64(p.depositEnd-p.depositStart)
+	rounded := int64(math.Round(deposit))
+	return []int64{rounded - 1, rounded, rounded + 1}
+}
+
+func int64Bounds(a, b int64) (int64, int64) {
+	if a < b {
+		return a, b
+	}
+	return b, a
+}
+
+func positiveOrMin(value, fallback int64) int64 {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
+func positiveOrMax(value, fallback int64) int64 {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func minInt64(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func addLocationMatch(counter *matchCounter, request domain.ContactRequest, file domain.PropertyFile) {

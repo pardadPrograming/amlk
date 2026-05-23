@@ -791,15 +791,21 @@ func (a *api) businessMainChannel(w http.ResponseWriter, r *http.Request, busine
 func (a *api) channelMessages(w http.ResponseWriter, r *http.Request, channelID string) {
 	user, _ := currentUser(r.Context())
 	limit, offset := channelPageParams(r)
-	items, total, err := a.deps.Channels.Messages(r.Context(), user.ID, channelID, limit, offset)
+	fromUnread := r.URL.Query().Get("fromUnread") == "true"
+	window := fromUnread || r.URL.Query().Get("window") == "true"
+	page, err := a.deps.Channels.Messages(r.Context(), user.ID, channelID, limit, offset, fromUnread)
 	if err != nil {
 		writeError(w, http.StatusForbidden, "channel_messages_failed", err.Error())
 		return
 	}
-	w.Header().Set("X-Total-Count", strconv.Itoa(total))
-	w.Header().Set("X-Limit", strconv.Itoa(limit))
-	w.Header().Set("X-Offset", strconv.Itoa(offset))
-	writeJSON(w, http.StatusOK, items)
+	w.Header().Set("X-Total-Count", strconv.Itoa(page.Total))
+	w.Header().Set("X-Limit", strconv.Itoa(page.Limit))
+	w.Header().Set("X-Offset", strconv.Itoa(page.Offset))
+	if window {
+		writeJSON(w, http.StatusOK, page)
+		return
+	}
+	writeJSON(w, http.StatusOK, page.Items)
 }
 
 func (a *api) createChannelMessage(w http.ResponseWriter, r *http.Request, channelID string) {

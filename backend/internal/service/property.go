@@ -20,6 +20,7 @@ import (
 
 	"amlakcrm/backend/internal/domain"
 	"amlakcrm/backend/internal/repository"
+	"amlakcrm/backend/internal/searchengine"
 	"amlakcrm/backend/internal/support"
 )
 
@@ -87,6 +88,7 @@ func (s *PropertyService) Create(ctx context.Context, userID, businessID string,
 	if err := s.syncPropertyVaults(ctx, userID, businessID, created); err != nil {
 		return domain.PropertyFile{}, err
 	}
+	s.notifyMatchingContactRequests(ctx, businessID, created)
 	return created, nil
 }
 
@@ -136,6 +138,7 @@ func (s *PropertyService) Update(ctx context.Context, userID, businessID, fileID
 	if err := s.syncPropertyVaults(ctx, userID, businessID, updated); err != nil {
 		return domain.PropertyFile{}, err
 	}
+	s.notifyMatchingContactRequests(ctx, businessID, updated)
 	return updated, nil
 }
 
@@ -274,7 +277,83 @@ func (s *PropertyService) accessibleVaultIDs(ctx context.Context, userID, busine
 		seen[channel.VaultID] = struct{}{}
 		result = append(result, channel.VaultID)
 	}
+	if member, err := s.store.GetMemberByUser(ctx, businessID, userID); err == nil &&
+		(member.Role == domain.RoleOwner || member.Role == domain.RoleManager || domain.HasPermission(member, domain.PermBusinessUpdate)) {
+		if vaults, err := s.store.ListBusinessVaults(ctx, businessID); err == nil {
+			for _, vault := range vaults {
+				if vault.ID == "" {
+					continue
+				}
+				if _, ok := seen[vault.ID]; ok {
+					continue
+				}
+				seen[vault.ID] = struct{}{}
+				result = append(result, vault.ID)
+			}
+		}
+	}
 	return result, nil
+}
+
+func (s *PropertyService) notifyMatchingContactRequests(ctx context.Context, businessID string, file domain.PropertyFile) {
+	contacts, err := s.store.ListContacts(ctx, businessID)
+	if err != nil {
+		return
+	}
+	accessCache := map[string]map[string]struct{}{}
+	for _, contact := range contacts {
+		if contact.CreatedByID == "" || len(contact.Requests) == 0 {
+			continue
+		}
+		if !s.fileVisibleToUser(ctx, contact.CreatedByID, businessID, file, accessCache) {
+			continue
+		}
+		for _, request := range contact.Requests {
+			if request.ID == "" || request.Status == "done" || request.Status == "finished" || request.Status == "suspended" {
+				continue
+			}
+			match := searchengine.MatchProperty(request, file)
+			if match.Tier == "" || match.Score == 0 {
+				continue
+			}
+			_, _ = s.store.CreateNotification(ctx, domain.Notification{
+				UserID:     contact.CreatedByID,
+				Type:       "request_property_match",
+				Title:      "فایل مناسب برای درخواست مشتری",
+				Body:       fmt.Sprintf("فایل %s با درخواست %s از مشتری %s حدود %d%% مچ شد.", file.Title, request.Title, contact.DisplayName, match.Score),
+				BusinessID: businessID,
+				PropertyID: file.ID,
+				RequestID:  request.ID,
+			})
+		}
+	}
+}
+
+func (s *PropertyService) fileVisibleToUser(ctx context.Context, userID, businessID string, file domain.PropertyFile, accessCache map[string]map[string]struct{}) bool {
+	if file.OwnerUserID == userID {
+		return true
+	}
+	if len(file.VaultIDs) == 0 {
+		return false
+	}
+	vaults, ok := accessCache[userID]
+	if !ok {
+		ids, err := s.accessibleVaultIDs(ctx, userID, businessID)
+		if err != nil {
+			return false
+		}
+		vaults = map[string]struct{}{}
+		for _, id := range ids {
+			vaults[id] = struct{}{}
+		}
+		accessCache[userID] = vaults
+	}
+	for _, vaultID := range file.VaultIDs {
+		if _, ok := vaults[vaultID]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *PropertyService) ShareRequests(ctx context.Context, userID, businessID, scope string) ([]domain.PropertyShareRequest, error) {

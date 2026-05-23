@@ -132,11 +132,20 @@ type Contact struct {
 }
 
 type PropertyMatchResult struct {
-	PropertyFile   PropertyFile `json:"propertyFile"`
-	Score          int          `json:"score"`
-	Tier           string       `json:"tier"`
-	MatchedReasons []string     `json:"matchedReasons"`
-	MissedReasons  []string     `json:"missedReasons"`
+	PropertyFile   PropertyFile          `json:"propertyFile"`
+	Score          int                   `json:"score"`
+	Tier           string                `json:"tier"`
+	MatchedReasons []string              `json:"matchedReasons"`
+	MissedReasons  []string              `json:"missedReasons"`
+	Access         []PropertyMatchAccess `json:"access,omitempty"`
+}
+
+type PropertyMatchAccess struct {
+	Source            string  `json:"source"`
+	VaultID           string  `json:"vaultId,omitempty"`
+	VaultTitle        string  `json:"vaultTitle,omitempty"`
+	CommissionPercent float64 `json:"commissionPercent,omitempty"`
+	Collaboration     bool    `json:"collaboration,omitempty"`
 }
 
 func SystemContactTags() []string {
