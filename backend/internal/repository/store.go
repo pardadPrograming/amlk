@@ -103,6 +103,10 @@ type Store interface {
 	UpdatePropertyShareRequest(ctx context.Context, request domain.PropertyShareRequest) (domain.PropertyShareRequest, error)
 	ListPropertyShareRequestsForOwner(ctx context.Context, businessID string, ownerUserID string) ([]domain.PropertyShareRequest, error)
 	ListPropertyShareRequestsForRequester(ctx context.Context, businessID string, requesterUserID string) ([]domain.PropertyShareRequest, error)
+	CreatePropertyOffer(ctx context.Context, offer domain.PropertyOffer) (domain.PropertyOffer, error)
+	GetPropertyOffer(ctx context.Context, businessID string, offerID string) (domain.PropertyOffer, error)
+	UpdatePropertyOffer(ctx context.Context, offer domain.PropertyOffer) (domain.PropertyOffer, error)
+	ListPropertyOffersForUser(ctx context.Context, businessID string, userID string, scope string) ([]domain.PropertyOffer, error)
 
 	CreateContact(ctx context.Context, contact domain.Contact) (domain.Contact, error)
 	ListContacts(ctx context.Context, businessID string) ([]domain.Contact, error)

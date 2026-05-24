@@ -17,6 +17,8 @@ class PropertiesController extends GetxController {
   final vaults = <ChannelVaultModel>[].obs;
   final ownerShareRequests = <PropertyShareRequestModel>[].obs;
   final requesterShareRequests = <PropertyShareRequestModel>[].obs;
+  final incomingOffers = <PropertyOfferModel>[].obs;
+  final outgoingOffers = <PropertyOfferModel>[].obs;
   final notifications = <NotificationModel>[].obs;
   final selectedUploads = <PickedMedia>[].obs;
   final latestFiles = <PropertyFileModel>[].obs;
@@ -198,6 +200,85 @@ class PropertiesController extends GetxController {
       );
     } catch (e) {
       Get.snackbar('خطا', _api.message(e));
+    }
+  }
+
+  Future<void> loadOffers() async {
+    final businessId = _businessId;
+    if (businessId == null) return;
+    try {
+      final incomingRes = await _api.dio.get(
+        '/businesses/$businessId/property-offers?scope=incoming',
+      );
+      incomingOffers.assignAll(
+        (incomingRes.data['data'] as List? ?? const []).map(
+          (e) => PropertyOfferModel.fromJson(Map<String, dynamic>.from(e)),
+        ),
+      );
+      final outgoingRes = await _api.dio.get(
+        '/businesses/$businessId/property-offers?scope=outgoing',
+      );
+      outgoingOffers.assignAll(
+        (outgoingRes.data['data'] as List? ?? const []).map(
+          (e) => PropertyOfferModel.fromJson(Map<String, dynamic>.from(e)),
+        ),
+      );
+    } catch (e) {
+      Get.snackbar('خطا', _api.message(e));
+    }
+  }
+
+  Future<void> sendOffer(
+    PropertyOfferModel offer,
+    double commissionPercent,
+  ) async {
+    final businessId = _businessId;
+    if (businessId == null) return;
+    loading.value = true;
+    try {
+      await _api.dio.post(
+        '/businesses/$businessId/property-offers/${offer.id}/send',
+        data: {'commissionPercent': commissionPercent},
+      );
+      await loadOffers();
+      Get.snackbar('پیشنهاد ارسال شد', 'پیشنهاد فایل برای گیرنده ارسال شد.');
+    } catch (e) {
+      Get.snackbar('خطا', _api.message(e));
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  Future<void> respondOffer(PropertyOfferModel offer, bool approve) async {
+    final businessId = _businessId;
+    if (businessId == null) return;
+    loading.value = true;
+    try {
+      await _api.dio.post(
+        '/businesses/$businessId/property-offers/${offer.id}/${approve ? 'accept' : 'reject'}',
+      );
+      await loadOffers();
+    } catch (e) {
+      Get.snackbar('خطا', _api.message(e));
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  Future<void> finalizeOffer(PropertyOfferModel offer, bool approve) async {
+    final businessId = _businessId;
+    if (businessId == null) return;
+    loading.value = true;
+    try {
+      await _api.dio.post(
+        '/businesses/$businessId/property-offers/${offer.id}/${approve ? 'final-approve' : 'final-reject'}',
+      );
+      await loadOffers();
+      await load();
+    } catch (e) {
+      Get.snackbar('خطا', _api.message(e));
+    } finally {
+      loading.value = false;
     }
   }
 

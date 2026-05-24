@@ -354,6 +354,11 @@ class DesktopSideNav extends StatelessWidget {
       route: AppRoutes.latestFiles,
     ),
     _NavItem(
+      title: 'پیشنهادها',
+      icon: Icons.local_offer_outlined,
+      route: AppRoutes.propertyOffers,
+    ),
+    _NavItem(
       title: 'چت‌ها',
       icon: Icons.chat_bubble_outline_rounded,
       route: AppRoutes.chats,
@@ -908,6 +913,11 @@ class AmlakDrawer extends StatelessWidget {
               leading: const Icon(Icons.dynamic_feed_outlined),
               title: const Text('جدیدترین فایل‌ها'),
               onTap: () => _replaceRoute(AppRoutes.latestFiles),
+            ),
+            ListTile(
+              leading: const Icon(Icons.local_offer_outlined),
+              title: const Text('پیشنهادها'),
+              onTap: () => _replaceRoute(AppRoutes.propertyOffers),
             ),
             ListTile(
               leading: const Icon(Icons.chat_bubble_outline_rounded),

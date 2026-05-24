@@ -364,6 +364,155 @@ func (s *PropertyService) ShareRequests(ctx context.Context, userID, businessID,
 	return s.store.ListPropertyShareRequestsForOwner(ctx, businessID, userID)
 }
 
+func (s *PropertyService) Offers(ctx context.Context, userID, businessID, scope string) ([]domain.PropertyOffer, error) {
+	if _, err := s.authorize(ctx, userID, businessID); err != nil {
+		return nil, err
+	}
+	return s.store.ListPropertyOffersForUser(ctx, businessID, userID, scope)
+}
+
+func (s *PropertyService) SendOffer(ctx context.Context, ownerID, businessID, offerID string, commissionPercent float64) (domain.PropertyOffer, error) {
+	if _, err := s.authorize(ctx, ownerID, businessID); err != nil {
+		return domain.PropertyOffer{}, err
+	}
+	offer, err := s.store.GetPropertyOffer(ctx, businessID, offerID)
+	if err != nil {
+		return domain.PropertyOffer{}, err
+	}
+	if offer.OwnerUserID != ownerID {
+		return domain.PropertyOffer{}, errors.New("فقط دارنده فایل می‌تواند این پیشنهاد را ارسال کند")
+	}
+	if offer.Status == domain.PropertyOfferApproved || offer.Status == domain.PropertyOfferRejected {
+		return domain.PropertyOffer{}, errors.New("این پیشنهاد قبلا تعیین تکلیف شده است")
+	}
+	if commissionPercent == 0 {
+		commissionPercent = offer.CommissionPercent
+	}
+	if commissionPercent == 0 {
+		commissionPercent = 25
+	}
+	if commissionPercent < 0 || commissionPercent > 100 {
+		return domain.PropertyOffer{}, errors.New("درصد پیشنهاد معتبر نیست")
+	}
+	owner, _ := s.store.GetUser(ctx, offer.OwnerUserID)
+	requester, err := s.store.GetUser(ctx, offer.RequesterUserID)
+	if err != nil {
+		return domain.PropertyOffer{}, errors.New("گیرنده پیشنهاد در سیستم پیدا نشد")
+	}
+	channel, _ := s.store.EnsurePrivateChannel(ctx, owner, requester)
+	prev := offer.Status
+	offer.CommissionPercent = commissionPercent
+	offer.Status = domain.PropertyOfferSent
+	offer.ChatChannelID = channel.ID
+	offer.History = appendOfferHistory(offer.History, ownerID, "send", prev, offer.Status, "پیشنهاد برای گیرنده ارسال شد")
+	offer, err = s.store.UpdatePropertyOffer(ctx, offer)
+	if err != nil {
+		return domain.PropertyOffer{}, err
+	}
+	_, _ = s.store.CreateNotification(ctx, domain.Notification{
+		UserID:     offer.RequesterUserID,
+		DedupKey:   "property_offer_sent:" + offer.ID,
+		Type:       "property_offer_sent",
+		Title:      "پیشنهاد فایل دریافت شد",
+		Body:       fmt.Sprintf("فایل %s با سهم %.0f%% برای شما پیشنهاد شده است.", offer.PropertyTitle, offer.CommissionPercent),
+		BusinessID: businessID,
+		PropertyID: offer.PropertyFileID,
+		RequestID:  offer.RequestID,
+	})
+	return offer, nil
+}
+
+func (s *PropertyService) RespondOffer(ctx context.Context, requesterID, businessID, offerID string, approve bool) (domain.PropertyOffer, error) {
+	if _, err := s.authorize(ctx, requesterID, businessID); err != nil {
+		return domain.PropertyOffer{}, err
+	}
+	offer, err := s.store.GetPropertyOffer(ctx, businessID, offerID)
+	if err != nil {
+		return domain.PropertyOffer{}, err
+	}
+	if offer.RequesterUserID != requesterID {
+		return domain.PropertyOffer{}, errors.New("این پیشنهاد متعلق به شما نیست")
+	}
+	if offer.Status != domain.PropertyOfferSent {
+		return domain.PropertyOffer{}, errors.New("این پیشنهاد در وضعیت قابل پاسخ نیست")
+	}
+	prev := offer.Status
+	if approve {
+		offer.Status = domain.PropertyOfferRequesterApproved
+		offer.History = appendOfferHistory(offer.History, requesterID, "requester_approve", prev, offer.Status, "گیرنده پیشنهاد را تایید کرد")
+	} else {
+		offer.Status = domain.PropertyOfferRejected
+		offer.History = appendOfferHistory(offer.History, requesterID, "requester_reject", prev, offer.Status, "گیرنده پیشنهاد را رد کرد")
+	}
+	offer, err = s.store.UpdatePropertyOffer(ctx, offer)
+	if err != nil {
+		return domain.PropertyOffer{}, err
+	}
+	notificationTitle := "پیشنهاد فایل تایید شد"
+	if !approve {
+		notificationTitle = "پیشنهاد فایل رد شد"
+	}
+	_, _ = s.store.CreateNotification(ctx, domain.Notification{
+		UserID:     offer.OwnerUserID,
+		DedupKey:   fmt.Sprintf("property_offer_response:%s:%s", offer.ID, offer.Status),
+		Type:       "property_offer_response",
+		Title:      notificationTitle,
+		Body:       fmt.Sprintf("پیشنهاد فایل %s توسط گیرنده به‌روزرسانی شد.", offer.PropertyTitle),
+		BusinessID: businessID,
+		PropertyID: offer.PropertyFileID,
+		RequestID:  offer.RequestID,
+	})
+	return offer, nil
+}
+
+func (s *PropertyService) FinalizeOffer(ctx context.Context, ownerID, businessID, offerID string, approve bool) (domain.PropertyOffer, error) {
+	if _, err := s.authorize(ctx, ownerID, businessID); err != nil {
+		return domain.PropertyOffer{}, err
+	}
+	offer, err := s.store.GetPropertyOffer(ctx, businessID, offerID)
+	if err != nil {
+		return domain.PropertyOffer{}, err
+	}
+	if offer.OwnerUserID != ownerID {
+		return domain.PropertyOffer{}, errors.New("فقط دارنده فایل می‌تواند تایید نهایی را انجام دهد")
+	}
+	if offer.Status != domain.PropertyOfferRequesterApproved {
+		return domain.PropertyOffer{}, errors.New("اول باید گیرنده پیشنهاد را تایید کند")
+	}
+	prev := offer.Status
+	if !approve {
+		offer.Status = domain.PropertyOfferRejected
+		offer.History = appendOfferHistory(offer.History, ownerID, "owner_reject", prev, offer.Status, "مالک فایل تایید نهایی را رد کرد")
+		offer, err = s.store.UpdatePropertyOffer(ctx, offer)
+		if err != nil {
+			return domain.PropertyOffer{}, err
+		}
+		return offer, nil
+	}
+	shared, err := s.createSharedFileFromOffer(ctx, businessID, offer)
+	if err != nil {
+		return domain.PropertyOffer{}, err
+	}
+	offer.Status = domain.PropertyOfferApproved
+	offer.SharedCopyFileID = shared.ID
+	offer.History = appendOfferHistory(offer.History, ownerID, "owner_approve", prev, offer.Status, "مالک فایل تایید نهایی را انجام داد")
+	offer, err = s.store.UpdatePropertyOffer(ctx, offer)
+	if err != nil {
+		return domain.PropertyOffer{}, err
+	}
+	_, _ = s.store.CreateNotification(ctx, domain.Notification{
+		UserID:     offer.RequesterUserID,
+		DedupKey:   "property_offer_final:" + offer.ID,
+		Type:       "property_offer_final",
+		Title:      "پیشنهاد فایل نهایی شد",
+		Body:       fmt.Sprintf("فایل %s به لیست مشارکتی شما اضافه شد.", offer.PropertyTitle),
+		BusinessID: businessID,
+		PropertyID: offer.PropertyFileID,
+		RequestID:  offer.RequestID,
+	})
+	return offer, nil
+}
+
 func (s *PropertyService) DecideShareRequest(ctx context.Context, ownerID, businessID, requestID string, approve bool) (domain.PropertyShareRequest, error) {
 	if _, err := s.authorize(ctx, ownerID, businessID); err != nil {
 		return domain.PropertyShareRequest{}, err
@@ -503,6 +652,66 @@ func upsertSharingHistory(items []domain.PropertySharingHistory, request domain.
 		}
 	}
 	return append(items, entry)
+}
+
+func appendOfferHistory(items []domain.PropertyOfferHistoryEntry, actorID, action string, from, to domain.PropertyOfferStatus, note string) []domain.PropertyOfferHistoryEntry {
+	return append(items, domain.PropertyOfferHistoryEntry{
+		ID:         support.NewID(),
+		ActorID:    actorID,
+		Action:     action,
+		FromStatus: from,
+		ToStatus:   to,
+		Note:       note,
+		CreatedAt:  time.Now().UTC(),
+	})
+}
+
+func (s *PropertyService) createSharedFileFromOffer(ctx context.Context, businessID string, offer domain.PropertyOffer) (domain.PropertyFile, error) {
+	if offer.SharedCopyFileID != "" {
+		return s.store.GetPropertyFile(ctx, businessID, offer.SharedCopyFileID)
+	}
+	original, err := s.store.GetPropertyFile(ctx, businessID, offer.PropertyFileID)
+	if err != nil {
+		return domain.PropertyFile{}, err
+	}
+	requester, _ := s.store.GetUser(ctx, offer.RequesterUserID)
+	request, err := s.store.CreatePropertyShareRequest(ctx, domain.PropertyShareRequest{
+		BusinessID:        businessID,
+		PropertyFileID:    original.ID,
+		PropertyTitle:     original.Title,
+		OwnerUserID:       original.OwnerUserID,
+		RequesterUserID:   offer.RequesterUserID,
+		RequesterName:     firstNonEmpty(offer.RequesterName, requester.DisplayName, requester.Phone),
+		RequesterPhone:    requester.Phone,
+		CommissionPercent: offer.CommissionPercent,
+		Status:            domain.PropertyShareReceived,
+		ReceivedAt:        time.Now().UTC(),
+	})
+	if err != nil {
+		return domain.PropertyFile{}, err
+	}
+	copy := original
+	copy.ID = ""
+	copy.OwnerUserID = offer.RequesterUserID
+	copy.SharedFromFileID = original.ID
+	copy.SharedFromOwnerID = original.OwnerUserID
+	copy.IsPartnershipCopy = true
+	copy.PartnershipCommissionPercent = offer.CommissionPercent
+	copy.SharingHistory = nil
+	copy.VaultIDs = nil
+	copy.VaultPlacements = nil
+	copy.CreatedAt = time.Time{}
+	copy.UpdatedAt = time.Time{}
+	created, err := s.store.CreatePropertyFile(ctx, copy)
+	if err != nil {
+		return domain.PropertyFile{}, err
+	}
+	request.SharedCopyFileID = created.ID
+	request.UpdatedAt = time.Now().UTC()
+	request, _ = s.store.UpdatePropertyShareRequest(ctx, request)
+	original.SharingHistory = upsertSharingHistory(original.SharingHistory, request)
+	_, _ = s.store.UpdatePropertyFile(ctx, original)
+	return created, nil
 }
 
 func validatePropertyNumbers(input domain.PropertyFile) error {

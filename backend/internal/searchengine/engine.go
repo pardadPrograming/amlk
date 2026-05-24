@@ -44,6 +44,7 @@ type propertySearchIndex struct {
 	areaNames       map[string][]int
 	streetNames     map[string][]int
 	neighborhoods   map[string][]int
+	types           map[domain.PropertyFileType][]int
 }
 
 func NewOptimizedMatchingService(store repository.Store, ttl time.Duration) *OptimizedMatchingService {
@@ -302,7 +303,176 @@ func (s *OptimizedMatchingService) NotifyMatchingContactRequests(ctx context.Con
 			})
 		}
 	}
+	if err := s.NotifyOfferCandidatesForProperty(ctx, businessID, propertyID); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (s *OptimizedMatchingService) NotifyOfferCandidatesForContact(ctx context.Context, businessID, contactID string) error {
+	contact, err := s.store.GetContact(ctx, businessID, contactID)
+	if err != nil {
+		return err
+	}
+	if contact.CreatedByID == "" {
+		return nil
+	}
+	ownerIDs, err := s.networkUserIDs(ctx, businessID, contact.CreatedByID)
+	if err != nil {
+		return err
+	}
+	if len(ownerIDs) == 0 {
+		return nil
+	}
+	files, err := s.store.ListPropertyFiles(ctx, businessID)
+	if err != nil {
+		return err
+	}
+	accessCache := map[string]map[string]domain.ChannelVault{}
+	for _, file := range files {
+		if _, ok := ownerIDs[file.OwnerUserID]; !ok || file.OwnerUserID == contact.CreatedByID {
+			continue
+		}
+		if s.fileVisibleToUser(ctx, contact.CreatedByID, businessID, file, accessCache) {
+			continue
+		}
+		s.createOfferCandidatesForContact(ctx, businessID, contact, file)
+	}
+	return nil
+}
+
+func (s *OptimizedMatchingService) NotifyOfferCandidatesForProperty(ctx context.Context, businessID, propertyID string) error {
+	file, err := s.store.GetPropertyFile(ctx, businessID, propertyID)
+	if err != nil {
+		return err
+	}
+	contacts, err := s.store.ListContacts(ctx, businessID)
+	if err != nil {
+		return err
+	}
+	networkCache := map[string]map[string]struct{}{}
+	accessCache := map[string]map[string]domain.ChannelVault{}
+	for _, contact := range contacts {
+		if contact.CreatedByID == "" || contact.CreatedByID == file.OwnerUserID || len(contact.Requests) == 0 {
+			continue
+		}
+		network, ok := networkCache[contact.CreatedByID]
+		if !ok {
+			network, err = s.networkUserIDs(ctx, businessID, contact.CreatedByID)
+			if err != nil {
+				continue
+			}
+			networkCache[contact.CreatedByID] = network
+		}
+		if _, ok := network[file.OwnerUserID]; !ok {
+			continue
+		}
+		if s.fileVisibleToUser(ctx, contact.CreatedByID, businessID, file, accessCache) {
+			continue
+		}
+		s.createOfferCandidatesForContact(ctx, businessID, contact, file)
+	}
+	return nil
+}
+
+func (s *OptimizedMatchingService) createOfferCandidatesForContact(ctx context.Context, businessID string, contact domain.Contact, file domain.PropertyFile) {
+	requester, _ := s.store.GetUser(ctx, contact.CreatedByID)
+	requesterName := strings.TrimSpace(requester.DisplayName)
+	if requesterName == "" {
+		requesterName = strings.TrimSpace(requester.Phone)
+	}
+	for _, request := range contact.Requests {
+		if request.ID == "" || request.Status == "done" || request.Status == "finished" || request.Status == "suspended" {
+			continue
+		}
+		match := MatchProperty(request, file)
+		if match.Tier == "" || match.Score == 0 {
+			continue
+		}
+		dedupKey := fmt.Sprintf("property_offer:%s:%s:%s", file.ID, contact.CreatedByID, request.ID)
+		offer, err := s.store.CreatePropertyOffer(ctx, domain.PropertyOffer{
+			DedupKey:          dedupKey,
+			BusinessID:        businessID,
+			PropertyFileID:    file.ID,
+			PropertyTitle:     file.Title,
+			OwnerUserID:       file.OwnerUserID,
+			RequesterUserID:   contact.CreatedByID,
+			RequesterName:     requesterName,
+			ContactID:         contact.ID,
+			ContactName:       contact.DisplayName,
+			RequestID:         request.ID,
+			RequestTitle:      request.Title,
+			CommissionPercent: 25,
+			Score:             match.Score,
+			Tier:              match.Tier,
+			Status:            domain.PropertyOfferCandidate,
+		})
+		if err != nil || offer.Status != domain.PropertyOfferCandidate {
+			continue
+		}
+		_, _ = s.store.CreateNotification(ctx, domain.Notification{
+			UserID:     file.OwnerUserID,
+			DedupKey:   "property_offer_candidate:" + offer.ID,
+			Type:       "property_offer_candidate",
+			Title:      "امکان پیشنهاد فایل",
+			Body:       fmt.Sprintf("فایل %s ممکن است برای درخواست %s مناسب باشد. می‌توانید آن را پیشنهاد دهید.", file.Title, request.Title),
+			BusinessID: businessID,
+			PropertyID: file.ID,
+			RequestID:  request.ID,
+		})
+	}
+}
+
+func (s *OptimizedMatchingService) networkUserIDs(ctx context.Context, businessID, userID string) (map[string]struct{}, error) {
+	user, err := s.store.GetUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	contacts, err := s.store.ListContacts(ctx, businessID)
+	if err != nil {
+		return nil, err
+	}
+	result := map[string]struct{}{}
+	userPhone := normalizeDigits(user.Phone)
+	for _, contact := range contacts {
+		if contact.CreatedByID == userID {
+			for _, phone := range contact.Phones {
+				other, err := s.userByPhone(ctx, phone.Value)
+				if err == nil && other.ID != "" && other.ID != userID {
+					result[other.ID] = struct{}{}
+				}
+			}
+			continue
+		}
+		for _, phone := range contact.Phones {
+			if normalizeDigits(phone.Value) == userPhone {
+				result[contact.CreatedByID] = struct{}{}
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
+func (s *OptimizedMatchingService) userByPhone(ctx context.Context, phone string) (domain.User, error) {
+	user, err := s.store.GetUserByPhone(ctx, phone)
+	if err == nil {
+		return user, nil
+	}
+	target := normalizeDigits(phone)
+	if target == "" {
+		return domain.User{}, err
+	}
+	users, listErr := s.store.ListUsers(ctx)
+	if listErr != nil {
+		return domain.User{}, err
+	}
+	for _, user := range users {
+		if normalizeDigits(user.Phone) == target {
+			return user, nil
+		}
+	}
+	return domain.User{}, err
 }
 
 func (s *OptimizedMatchingService) fileVisibleToUser(ctx context.Context, userID, businessID string, file domain.PropertyFile, accessCache map[string]map[string]domain.ChannelVault) bool {
@@ -381,10 +551,15 @@ func buildPropertySearchIndex(files []domain.PropertyFile, accessByFileID map[st
 		areaNames:       map[string][]int{},
 		streetNames:     map[string][]int{},
 		neighborhoods:   map[string][]int{},
+		types:           map[domain.PropertyFileType][]int{},
 	}
 	for _, file := range files {
 		idx := len(index.files)
 		index.files = append(index.files, file)
+		addTypeIndexValue(index.types, file.Type, idx)
+		for _, fileType := range file.Types {
+			addTypeIndexValue(index.types, fileType, idx)
+		}
 		for _, address := range file.Addresses {
 			addIndexValue(index.areaIDs, address.AreaID, idx)
 			addIndexValue(index.streetIDs, address.StreetID, idx)
@@ -405,26 +580,84 @@ func addIndexValue(values map[string][]int, key string, idx int) {
 	values[key] = append(values[key], idx)
 }
 
+func addTypeIndexValue(values map[domain.PropertyFileType][]int, key domain.PropertyFileType, idx int) {
+	if key == "" {
+		return
+	}
+	values[key] = append(values[key], idx)
+}
+
+func normalizeDigits(value string) string {
+	var builder strings.Builder
+	for _, r := range value {
+		if r >= '0' && r <= '9' {
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
+}
+
 func candidatePropertyFiles(index propertySearchIndex, request domain.ContactRequest) []domain.PropertyFile {
-	if len(request.Locations) == 0 {
+	typeCandidates := candidateIndexesForType(index, request.Type)
+	locationCandidates := candidateIndexesForLocations(index, request.Locations)
+
+	switch {
+	case request.Type != "" && len(request.Locations) > 0 && len(locationCandidates) > 0:
+		return filesForCandidateIndexes(index, intersectCandidateIndexes(typeCandidates, locationCandidates))
+	case request.Type != "":
+		return filesForCandidateIndexes(index, typeCandidates)
+	case len(locationCandidates) > 0:
+		return filesForCandidateIndexes(index, locationCandidates)
+	default:
 		return index.files
 	}
+}
+
+func candidateIndexesForType(index propertySearchIndex, requestType string) map[int]struct{} {
+	if requestType == "" {
+		return nil
+	}
 	seen := map[int]struct{}{}
-	for _, location := range request.Locations {
+	for _, idx := range index.types[domain.PropertyFileType(requestType)] {
+		seen[idx] = struct{}{}
+	}
+	return seen
+}
+
+func candidateIndexesForLocations(index propertySearchIndex, locations []domain.ContactRequestLocation) map[int]struct{} {
+	if len(locations) == 0 {
+		return nil
+	}
+	seen := map[int]struct{}{}
+	for _, location := range locations {
 		for _, idx := range candidateIndexesForLocation(index, location) {
 			seen[idx] = struct{}{}
 		}
 	}
-	if len(seen) == 0 {
-		return index.files
+	return seen
+}
+
+func intersectCandidateIndexes(left, right map[int]struct{}) map[int]struct{} {
+	if len(left) > len(right) {
+		left, right = right, left
 	}
-	candidates := make([]domain.PropertyFile, 0, len(seen))
-	for idx := range seen {
-		if idx >= 0 && idx < len(index.files) {
-			candidates = append(candidates, index.files[idx])
+	result := map[int]struct{}{}
+	for idx := range left {
+		if _, ok := right[idx]; ok {
+			result[idx] = struct{}{}
 		}
 	}
-	return candidates
+	return result
+}
+
+func filesForCandidateIndexes(index propertySearchIndex, candidates map[int]struct{}) []domain.PropertyFile {
+	files := make([]domain.PropertyFile, 0, len(candidates))
+	for idx := range candidates {
+		if idx >= 0 && idx < len(index.files) {
+			files = append(files, index.files[idx])
+		}
+	}
+	return files
 }
 
 func candidateIndexesForLocation(index propertySearchIndex, location domain.ContactRequestLocation) []int {

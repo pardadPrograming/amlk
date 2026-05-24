@@ -24,6 +24,7 @@ type Event struct {
 const (
 	SearchInvalidateEvent = "search.invalidate"
 	PropertyChangedEvent  = "property.changed"
+	ContactChangedEvent   = "contact.changed"
 )
 
 type SearchInvalidatePayload struct {
@@ -35,6 +36,12 @@ type PropertyChangedPayload struct {
 	BusinessID string `json:"businessId"`
 	UserID     string `json:"userId"`
 	PropertyID string `json:"propertyId"`
+}
+
+type ContactChangedPayload struct {
+	BusinessID string `json:"businessId"`
+	UserID     string `json:"userId"`
+	ContactID  string `json:"contactId"`
 }
 
 type NoopPublisher struct{}

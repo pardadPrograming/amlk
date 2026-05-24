@@ -258,6 +258,24 @@ func NewRouter(deps RouterDeps) http.Handler {
 	protected.HandleFunc("GET /api/v1/businesses/{businessId}/property-share-requests", func(w http.ResponseWriter, r *http.Request) {
 		api.propertyShareRequests(w, r, r.PathValue("businessId"))
 	})
+	protected.HandleFunc("GET /api/v1/businesses/{businessId}/property-offers", func(w http.ResponseWriter, r *http.Request) {
+		api.propertyOffers(w, r, r.PathValue("businessId"))
+	})
+	protected.HandleFunc("POST /api/v1/businesses/{businessId}/property-offers/{offerId}/send", func(w http.ResponseWriter, r *http.Request) {
+		api.sendPropertyOffer(w, r, r.PathValue("businessId"), r.PathValue("offerId"))
+	})
+	protected.HandleFunc("POST /api/v1/businesses/{businessId}/property-offers/{offerId}/accept", func(w http.ResponseWriter, r *http.Request) {
+		api.respondPropertyOffer(w, r, r.PathValue("businessId"), r.PathValue("offerId"), true)
+	})
+	protected.HandleFunc("POST /api/v1/businesses/{businessId}/property-offers/{offerId}/reject", func(w http.ResponseWriter, r *http.Request) {
+		api.respondPropertyOffer(w, r, r.PathValue("businessId"), r.PathValue("offerId"), false)
+	})
+	protected.HandleFunc("POST /api/v1/businesses/{businessId}/property-offers/{offerId}/final-approve", func(w http.ResponseWriter, r *http.Request) {
+		api.finalizePropertyOffer(w, r, r.PathValue("businessId"), r.PathValue("offerId"), true)
+	})
+	protected.HandleFunc("POST /api/v1/businesses/{businessId}/property-offers/{offerId}/final-reject", func(w http.ResponseWriter, r *http.Request) {
+		api.finalizePropertyOffer(w, r, r.PathValue("businessId"), r.PathValue("offerId"), false)
+	})
 	protected.HandleFunc("POST /api/v1/businesses/{businessId}/property-share-requests/{requestId}/approve", func(w http.ResponseWriter, r *http.Request) {
 		api.decidePropertyShare(w, r, r.PathValue("businessId"), r.PathValue("requestId"), true)
 	})

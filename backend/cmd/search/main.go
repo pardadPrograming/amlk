@@ -183,6 +183,12 @@ func startInvalidationConsumer(cfg config.Config, logger *slog.Logger, matcher *
 		logger.Warn("rabbitmq property queue bind failed; search cache invalidation disabled", "error", err)
 		return nil
 	}
+	if err := ch.QueueBind(queue.Name, events.ContactChangedEvent, cfg.EventExchange, false, nil); err != nil {
+		_ = ch.Close()
+		_ = conn.Close()
+		logger.Warn("rabbitmq contact queue bind failed; search cache invalidation disabled", "error", err)
+		return nil
+	}
 	deliveries, err := ch.Consume(queue.Name, "", false, false, false, false, nil)
 	if err != nil {
 		_ = ch.Close()
@@ -220,6 +226,20 @@ func startInvalidationConsumer(cfg config.Config, logger *slog.Logger, matcher *
 				if payload.BusinessID != "" && payload.PropertyID != "" {
 					if err := matcher.NotifyMatchingContactRequests(context.Background(), payload.BusinessID, payload.PropertyID); err != nil {
 						logger.Warn("property match notification failed", "business_id", payload.BusinessID, "property_id", payload.PropertyID, "error", err)
+					}
+				}
+			case events.ContactChangedEvent:
+				var payload events.ContactChangedPayload
+				if err := json.Unmarshal(event.Payload, &payload); err != nil {
+					_ = delivery.Nack(false, false)
+					continue
+				}
+				if payload.BusinessID != "" && payload.UserID != "" {
+					matcher.Invalidate(payload.BusinessID, payload.UserID)
+				}
+				if payload.BusinessID != "" && payload.ContactID != "" {
+					if err := matcher.NotifyOfferCandidatesForContact(context.Background(), payload.BusinessID, payload.ContactID); err != nil {
+						logger.Warn("contact offer candidate scan failed", "business_id", payload.BusinessID, "contact_id", payload.ContactID, "error", err)
 					}
 				}
 			}

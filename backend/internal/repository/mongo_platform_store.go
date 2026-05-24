@@ -91,6 +91,10 @@ func (s *MongoPlatformStore) EnsurePlatformIndexes(ctx context.Context) error {
 				{Keys: bson.D{{Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)},
 				{Keys: bson.D{{Key: "businessId", Value: 1}, {Key: "ownerUserId", Value: 1}, {Key: "updatedAt", Value: -1}}},
 				{Keys: bson.D{{Key: "businessId", Value: 1}, {Key: "ownerUserId", Value: 1}, {Key: "createdAt", Value: -1}}},
+				{Keys: bson.D{{Key: "businessId", Value: 1}, {Key: "vaultIds", Value: 1}, {Key: "updatedAt", Value: -1}}},
+				{Keys: bson.D{{Key: "businessId", Value: 1}, {Key: "vaultIds", Value: 1}, {Key: "createdAt", Value: -1}}},
+				{Keys: bson.D{{Key: "businessId", Value: 1}, {Key: "type", Value: 1}, {Key: "createdAt", Value: -1}}},
+				{Keys: bson.D{{Key: "businessId", Value: 1}, {Key: "types", Value: 1}, {Key: "createdAt", Value: -1}}},
 				{Keys: bson.D{{Key: "sharedFromFileId", Value: 1}}},
 			},
 		},
@@ -100,6 +104,15 @@ func (s *MongoPlatformStore) EnsurePlatformIndexes(ctx context.Context) error {
 				{Keys: bson.D{{Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)},
 				{Keys: bson.D{{Key: "businessId", Value: 1}, {Key: "ownerUserId", Value: 1}, {Key: "createdAt", Value: -1}}},
 				{Keys: bson.D{{Key: "businessId", Value: 1}, {Key: "requesterUserId", Value: 1}, {Key: "createdAt", Value: -1}}},
+			},
+		},
+		{
+			collection: "property_offers",
+			models: []mongo.IndexModel{
+				{Keys: bson.D{{Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)},
+				{Keys: bson.D{{Key: "businessId", Value: 1}, {Key: "ownerUserId", Value: 1}, {Key: "updatedAt", Value: -1}}},
+				{Keys: bson.D{{Key: "businessId", Value: 1}, {Key: "requesterUserId", Value: 1}, {Key: "updatedAt", Value: -1}}},
+				{Keys: bson.D{{Key: "businessId", Value: 1}, {Key: "dedupKey", Value: 1}}, Options: options.Index().SetUnique(true).SetSparse(true)},
 			},
 		},
 		{
@@ -172,7 +185,31 @@ func (s *MongoPlatformStore) EnsurePlatformIndexes(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := s.backfillPropertyFileQueryFields(ctx); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (s *MongoPlatformStore) backfillPropertyFileQueryFields(ctx context.Context) error {
+	_, err := s.db.Collection("property_files").UpdateMany(ctx, bson.M{
+		"$or": bson.A{
+			bson.M{"createdAt": bson.M{"$exists": false}},
+			bson.M{"status": bson.M{"$exists": false}},
+			bson.M{"type": bson.M{"$exists": false}},
+			bson.M{"types": bson.M{"$exists": false}},
+			bson.M{"vaultIds": bson.M{"$exists": false}},
+		},
+	}, mongo.Pipeline{
+		bson.D{{Key: "$set", Value: bson.D{
+			{Key: "status", Value: "$data.status"},
+			{Key: "type", Value: "$data.type"},
+			{Key: "types", Value: "$data.types"},
+			{Key: "vaultIds", Value: "$data.vaultIds"},
+			{Key: "createdAt", Value: "$data.createdAt"},
+		}}},
+	})
+	return mongoErr(err)
 }
 
 func (s *MongoPlatformStore) CreateBusiness(ctx context.Context, business domain.Business) (domain.Business, error) {
@@ -499,6 +536,74 @@ func (s *MongoPlatformStore) ListPropertyShareRequestsForOwner(ctx context.Conte
 
 func (s *MongoPlatformStore) ListPropertyShareRequestsForRequester(ctx context.Context, businessID string, requesterUserID string) ([]domain.PropertyShareRequest, error) {
 	return findStoredDataWithOptions[domain.PropertyShareRequest](ctx, s.db.Collection("property_share_requests"), bson.M{"businessId": businessID, "requesterUserId": requesterUserID}, options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}))
+}
+
+func (s *MongoPlatformStore) CreatePropertyOffer(ctx context.Context, offer domain.PropertyOffer) (domain.PropertyOffer, error) {
+	if offer.DedupKey != "" {
+		existing, err := findOneStoredData[domain.PropertyOffer](ctx, s.db.Collection("property_offers"), bson.M{
+			"businessId": offer.BusinessID,
+			"dedupKey":   offer.DedupKey,
+		})
+		if err == nil {
+			return existing, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return domain.PropertyOffer{}, err
+		}
+	}
+	now := time.Now().UTC()
+	offer.ID = support.NewID()
+	offer.CreatedAt = now
+	offer.UpdatedAt = now
+	if offer.Status == "" {
+		offer.Status = domain.PropertyOfferCandidate
+	}
+	if err := s.savePropertyOffer(ctx, offer); err != nil {
+		if offer.DedupKey != "" {
+			existing, findErr := findOneStoredData[domain.PropertyOffer](ctx, s.db.Collection("property_offers"), bson.M{
+				"businessId": offer.BusinessID,
+				"dedupKey":   offer.DedupKey,
+			})
+			if findErr == nil {
+				return existing, nil
+			}
+		}
+		return domain.PropertyOffer{}, err
+	}
+	return offer, nil
+}
+
+func (s *MongoPlatformStore) GetPropertyOffer(ctx context.Context, businessID string, offerID string) (domain.PropertyOffer, error) {
+	return findOneStoredData[domain.PropertyOffer](ctx, s.db.Collection("property_offers"), bson.M{"id": offerID, "businessId": businessID})
+}
+
+func (s *MongoPlatformStore) UpdatePropertyOffer(ctx context.Context, offer domain.PropertyOffer) (domain.PropertyOffer, error) {
+	existing, err := s.GetPropertyOffer(ctx, offer.BusinessID, offer.ID)
+	if err != nil {
+		return domain.PropertyOffer{}, err
+	}
+	offer.CreatedAt = existing.CreatedAt
+	offer.UpdatedAt = time.Now().UTC()
+	if err := s.savePropertyOffer(ctx, offer); err != nil {
+		return domain.PropertyOffer{}, err
+	}
+	return offer, nil
+}
+
+func (s *MongoPlatformStore) ListPropertyOffersForUser(ctx context.Context, businessID string, userID string, scope string) ([]domain.PropertyOffer, error) {
+	filter := bson.M{"businessId": businessID}
+	switch scope {
+	case "incoming":
+		filter["requesterUserId"] = userID
+	case "outgoing":
+		filter["ownerUserId"] = userID
+	default:
+		filter["$or"] = bson.A{
+			bson.M{"requesterUserId": userID},
+			bson.M{"ownerUserId": userID},
+		}
+	}
+	return findStoredDataWithOptions[domain.PropertyOffer](ctx, s.db.Collection("property_offers"), filter, options.Find().SetSort(bson.D{{Key: "updatedAt", Value: -1}}))
 }
 
 func (s *MongoPlatformStore) CreateContact(ctx context.Context, contact domain.Contact) (domain.Contact, error) {
@@ -1153,6 +1258,11 @@ func (s *MongoPlatformStore) savePropertyFile(ctx context.Context, item domain.P
 		"businessId":       item.BusinessID,
 		"ownerUserId":      item.OwnerUserID,
 		"sharedFromFileId": item.SharedFromFileID,
+		"status":           item.Status,
+		"type":             item.Type,
+		"types":            item.Types,
+		"vaultIds":         item.VaultIDs,
+		"createdAt":        item.CreatedAt,
 		"updatedAt":        item.UpdatedAt,
 		"data":             item,
 	})
@@ -1170,6 +1280,25 @@ func (s *MongoPlatformStore) savePropertyShareRequest(ctx context.Context, item 
 		"updatedAt":       item.UpdatedAt,
 		"data":            item,
 	})
+}
+
+func (s *MongoPlatformStore) savePropertyOffer(ctx context.Context, item domain.PropertyOffer) error {
+	doc := bson.M{
+		"id":              item.ID,
+		"businessId":      item.BusinessID,
+		"propertyFileId":  item.PropertyFileID,
+		"ownerUserId":     item.OwnerUserID,
+		"requesterUserId": item.RequesterUserID,
+		"contactId":       item.ContactID,
+		"requestId":       item.RequestID,
+		"status":          item.Status,
+		"updatedAt":       item.UpdatedAt,
+		"data":            item,
+	}
+	if item.DedupKey != "" {
+		doc["dedupKey"] = item.DedupKey
+	}
+	return s.upsertStored(ctx, "property_offers", bson.M{"id": item.ID}, doc)
 }
 
 func (s *MongoPlatformStore) saveFile(ctx context.Context, item domain.FileObject) error {

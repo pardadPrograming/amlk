@@ -2,6 +2,7 @@ package searchengine
 
 import (
 	"testing"
+	"time"
 
 	"amlakcrm/backend/internal/domain"
 )
@@ -103,5 +104,33 @@ func TestRentLeaseFinancialMatching(t *testing.T) {
 				t.Fatalf("expected tier %q, got %q", tt.wantTier, result.Tier)
 			}
 		})
+	}
+}
+
+func TestNormalizePersianName(t *testing.T) {
+	got := NormalizePersianName("  كيان\u200cپارس  ")
+	want := "کیان پارس"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestCandidatePropertyFilesPrefiltersByType(t *testing.T) {
+	index := buildPropertySearchIndex([]domain.PropertyFile{
+		{
+			ID:    "sale-1",
+			Type:  domain.PropertyFileSale,
+			Types: []domain.PropertyFileType{domain.PropertyFileSale},
+		},
+		{
+			ID:    "rent-1",
+			Type:  domain.PropertyFileRentLease,
+			Types: []domain.PropertyFileType{domain.PropertyFileRentLease},
+		},
+	}, nil, time.Now())
+
+	candidates := candidatePropertyFiles(index, domain.ContactRequest{Type: "rent_lease"})
+	if len(candidates) != 1 || candidates[0].ID != "rent-1" {
+		t.Fatalf("expected only rent candidate, got %#v", candidates)
 	}
 }

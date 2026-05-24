@@ -456,7 +456,11 @@ func numberValue(key string, file domain.PropertyFile) (int, bool) {
 
 func NormalizePersianName(value string) string {
 	value = strings.TrimSpace(value)
-	value = strings.ReplaceAll(value, "?", "?")
-	value = strings.ReplaceAll(value, "?", "?")
+	replacer := strings.NewReplacer(
+		"ي", "ی",
+		"ك", "ک",
+		"\u200c", " ",
+	)
+	value = replacer.Replace(value)
 	return strings.Join(strings.Fields(value), " ")
 }

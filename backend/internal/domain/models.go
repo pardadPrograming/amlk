@@ -248,6 +248,51 @@ type PropertyShareRequest struct {
 	ReceivedAt        time.Time                  `json:"receivedAt,omitempty"`
 }
 
+type PropertyOfferStatus string
+
+const (
+	PropertyOfferCandidate         PropertyOfferStatus = "candidate"
+	PropertyOfferSent              PropertyOfferStatus = "sent"
+	PropertyOfferRequesterApproved PropertyOfferStatus = "requester_approved"
+	PropertyOfferApproved          PropertyOfferStatus = "approved"
+	PropertyOfferRejected          PropertyOfferStatus = "rejected"
+)
+
+type PropertyOfferHistoryEntry struct {
+	ID         string              `json:"id"`
+	ActorID    string              `json:"actorId,omitempty"`
+	Action     string              `json:"action"`
+	FromStatus PropertyOfferStatus `json:"fromStatus,omitempty"`
+	ToStatus   PropertyOfferStatus `json:"toStatus,omitempty"`
+	Note       string              `json:"note,omitempty"`
+	CreatedAt  time.Time           `json:"createdAt"`
+}
+
+type PropertyOffer struct {
+	ID                string                      `json:"id"`
+	DedupKey          string                      `json:"dedupKey,omitempty"`
+	BusinessID        string                      `json:"businessId"`
+	PropertyFileID    string                      `json:"propertyFileId"`
+	PropertyTitle     string                      `json:"propertyTitle"`
+	OwnerUserID       string                      `json:"ownerUserId"`
+	OwnerName         string                      `json:"ownerName,omitempty"`
+	RequesterUserID   string                      `json:"requesterUserId"`
+	RequesterName     string                      `json:"requesterName,omitempty"`
+	ContactID         string                      `json:"contactId,omitempty"`
+	ContactName       string                      `json:"contactName,omitempty"`
+	RequestID         string                      `json:"requestId,omitempty"`
+	RequestTitle      string                      `json:"requestTitle,omitempty"`
+	CommissionPercent float64                     `json:"commissionPercent"`
+	Score             int                         `json:"score,omitempty"`
+	Tier              string                      `json:"tier,omitempty"`
+	Status            PropertyOfferStatus         `json:"status"`
+	ChatChannelID     string                      `json:"chatChannelId,omitempty"`
+	SharedCopyFileID  string                      `json:"sharedCopyFileId,omitempty"`
+	History           []PropertyOfferHistoryEntry `json:"history,omitempty"`
+	CreatedAt         time.Time                   `json:"createdAt"`
+	UpdatedAt         time.Time                   `json:"updatedAt"`
+}
+
 type PropertySharingHistory struct {
 	RequestID         string                     `json:"requestId"`
 	UserID            string                     `json:"userId"`

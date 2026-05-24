@@ -443,6 +443,95 @@ class PropertyShareRequestModel {
       );
 }
 
+class PropertyOfferHistoryModel {
+  PropertyOfferHistoryModel({
+    required this.id,
+    this.action = '',
+    this.fromStatus = '',
+    this.toStatus = '',
+    this.note = '',
+    this.createdAt = '',
+  });
+
+  final String id;
+  final String action;
+  final String fromStatus;
+  final String toStatus;
+  final String note;
+  final String createdAt;
+
+  factory PropertyOfferHistoryModel.fromJson(Map<String, dynamic> json) =>
+      PropertyOfferHistoryModel(
+        id: json['id']?.toString() ?? '',
+        action: json['action']?.toString() ?? '',
+        fromStatus: json['fromStatus']?.toString() ?? '',
+        toStatus: json['toStatus']?.toString() ?? '',
+        note: json['note']?.toString() ?? '',
+        createdAt: json['createdAt']?.toString() ?? '',
+      );
+}
+
+class PropertyOfferModel {
+  PropertyOfferModel({
+    required this.id,
+    required this.propertyFileId,
+    required this.propertyTitle,
+    this.ownerUserId = '',
+    this.requesterUserId = '',
+    this.requesterName = '',
+    this.contactName = '',
+    this.requestTitle = '',
+    this.commissionPercent = 25,
+    this.score = 0,
+    this.tier = '',
+    this.status = '',
+    this.chatChannelId = '',
+    this.sharedCopyFileId = '',
+    this.history = const [],
+  });
+
+  final String id;
+  final String propertyFileId;
+  final String propertyTitle;
+  final String ownerUserId;
+  final String requesterUserId;
+  final String requesterName;
+  final String contactName;
+  final String requestTitle;
+  final double commissionPercent;
+  final int score;
+  final String tier;
+  final String status;
+  final String chatChannelId;
+  final String sharedCopyFileId;
+  final List<PropertyOfferHistoryModel> history;
+
+  factory PropertyOfferModel.fromJson(Map<String, dynamic> json) =>
+      PropertyOfferModel(
+        id: json['id']?.toString() ?? '',
+        propertyFileId: json['propertyFileId']?.toString() ?? '',
+        propertyTitle: json['propertyTitle']?.toString() ?? '',
+        ownerUserId: json['ownerUserId']?.toString() ?? '',
+        requesterUserId: json['requesterUserId']?.toString() ?? '',
+        requesterName: json['requesterName']?.toString() ?? '',
+        contactName: json['contactName']?.toString() ?? '',
+        requestTitle: json['requestTitle']?.toString() ?? '',
+        commissionPercent: (json['commissionPercent'] as num? ?? 25).toDouble(),
+        score: (json['score'] as num? ?? 0).toInt(),
+        tier: json['tier']?.toString() ?? '',
+        status: json['status']?.toString() ?? '',
+        chatChannelId: json['chatChannelId']?.toString() ?? '',
+        sharedCopyFileId: json['sharedCopyFileId']?.toString() ?? '',
+        history: (json['history'] as List? ?? const [])
+            .map(
+              (e) => PropertyOfferHistoryModel.fromJson(
+                Map<String, dynamic>.from(e),
+              ),
+            )
+            .toList(),
+      );
+}
+
 class NotificationModel {
   NotificationModel({
     required this.id,

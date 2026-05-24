@@ -28,6 +28,7 @@ class _InvitationInboxPageState extends State<InvitationInboxPage> {
       controller.loadInbox(),
       properties.loadShareRequests(),
       properties.loadNotifications(),
+      properties.loadOffers(),
     ]);
   }
 
@@ -51,11 +52,23 @@ class _InvitationInboxPageState extends State<InvitationInboxPage> {
                 )
                 .toList();
             final notifications = properties.notifications;
+            final incomingOffers = properties.incomingOffers
+                .where((item) => item.status == 'sent')
+                .toList();
+            final outgoingOfferActions = properties.outgoingOffers
+                .where(
+                  (item) =>
+                      item.status == 'candidate' ||
+                      item.status == 'requester_approved',
+                )
+                .toList();
             final total =
                 invitations.length +
                 incomingShares.length +
                 outgoingShares.length +
-                notifications.length;
+                notifications.length +
+                incomingOffers.length +
+                outgoingOfferActions.length;
             if (total == 0) {
               return ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
@@ -100,6 +113,38 @@ class _InvitationInboxPageState extends State<InvitationInboxPage> {
                       incoming: true,
                       onAccept: () => properties.decideShare(request, true),
                       onReject: () => properties.decideShare(request, false),
+                    ),
+                  ),
+                ],
+                if (incomingOffers.isNotEmpty) ...[
+                  const _InboxSectionTitle(title: 'پیشنهادهای فایل دریافتی'),
+                  ...incomingOffers.map(
+                    (offer) => _OfferInboxCard(
+                      offer: offer,
+                      incoming: true,
+                      onAccept: () => properties.respondOffer(offer, true),
+                      onReject: () => properties.respondOffer(offer, false),
+                    ),
+                  ),
+                ],
+                if (outgoingOfferActions.isNotEmpty) ...[
+                  const _InboxSectionTitle(title: 'اقدام‌های پیشنهاد فایل'),
+                  ...outgoingOfferActions.map(
+                    (offer) => _OfferInboxCard(
+                      offer: offer,
+                      incoming: false,
+                      onSend: offer.status == 'candidate'
+                          ? () => properties.sendOffer(
+                              offer,
+                              offer.commissionPercent,
+                            )
+                          : null,
+                      onAccept: offer.status == 'requester_approved'
+                          ? () => properties.finalizeOffer(offer, true)
+                          : null,
+                      onReject: offer.status == 'requester_approved'
+                          ? () => properties.finalizeOffer(offer, false)
+                          : null,
                     ),
                   ),
                 ],
@@ -237,6 +282,50 @@ class _ShareInboxCard extends StatelessWidget {
                 onPressed: onReceive,
                 child: const Text('دریافت فایل'),
               ),
+      ),
+    );
+  }
+}
+
+class _OfferInboxCard extends StatelessWidget {
+  const _OfferInboxCard({
+    required this.offer,
+    required this.incoming,
+    this.onSend,
+    this.onAccept,
+    this.onReject,
+  });
+
+  final PropertyOfferModel offer;
+  final bool incoming;
+  final VoidCallback? onSend;
+  final VoidCallback? onAccept;
+  final VoidCallback? onReject;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.local_offer_outlined),
+        title: Text(offer.propertyTitle),
+        subtitle: Text(
+          incoming
+              ? 'سهم ${offer.commissionPercent.toStringAsFixed(0)}% | ${offer.requestTitle}'
+              : offer.status == 'candidate'
+              ? 'برای ${offer.contactName} قابل پیشنهاد است | مچ ${offer.score}%'
+              : '${offer.contactName} پیشنهاد را تایید کرده و منتظر تایید نهایی است',
+        ),
+        trailing: Wrap(
+          spacing: 8,
+          children: [
+            if (onSend != null)
+              FilledButton(onPressed: onSend, child: const Text('پیشنهاد')),
+            if (onReject != null)
+              TextButton(onPressed: onReject, child: const Text('رد')),
+            if (onAccept != null)
+              FilledButton(onPressed: onAccept, child: const Text('تایید')),
+          ],
+        ),
       ),
     );
   }

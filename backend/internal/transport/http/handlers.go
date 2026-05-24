@@ -549,6 +549,50 @@ func (a *api) propertyShareRequests(w http.ResponseWriter, r *http.Request, busi
 	writeJSON(w, http.StatusOK, items)
 }
 
+func (a *api) propertyOffers(w http.ResponseWriter, r *http.Request, businessID string) {
+	user, _ := currentUser(r.Context())
+	items, err := a.deps.Properties.Offers(r.Context(), user.ID, businessID, r.URL.Query().Get("scope"))
+	if err != nil {
+		writeError(w, http.StatusForbidden, "property_offers_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (a *api) sendPropertyOffer(w http.ResponseWriter, r *http.Request, businessID, offerID string) {
+	user, _ := currentUser(r.Context())
+	var req struct {
+		CommissionPercent float64 `json:"commissionPercent"`
+	}
+	_ = decodeJSON(r, &req)
+	offer, err := a.deps.Properties.SendOffer(r.Context(), user.ID, businessID, offerID, req.CommissionPercent)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "property_offer_send_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, offer)
+}
+
+func (a *api) respondPropertyOffer(w http.ResponseWriter, r *http.Request, businessID, offerID string, approve bool) {
+	user, _ := currentUser(r.Context())
+	offer, err := a.deps.Properties.RespondOffer(r.Context(), user.ID, businessID, offerID, approve)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "property_offer_response_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, offer)
+}
+
+func (a *api) finalizePropertyOffer(w http.ResponseWriter, r *http.Request, businessID, offerID string, approve bool) {
+	user, _ := currentUser(r.Context())
+	offer, err := a.deps.Properties.FinalizeOffer(r.Context(), user.ID, businessID, offerID, approve)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "property_offer_finalize_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, offer)
+}
+
 func (a *api) decidePropertyShare(w http.ResponseWriter, r *http.Request, businessID, requestID string, approve bool) {
 	user, _ := currentUser(r.Context())
 	request, err := a.deps.Properties.DecideShareRequest(r.Context(), user.ID, businessID, requestID, approve)

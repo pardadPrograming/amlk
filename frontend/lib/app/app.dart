@@ -18,6 +18,7 @@ import '../features/locations/pages/locations_page.dart';
 import '../features/placeholders/placeholder_page.dart';
 import '../features/properties/pages/latest_files_page.dart';
 import '../features/properties/pages/properties_page.dart';
+import '../features/properties/pages/property_offers_page.dart';
 import '../features/settings/settings_page.dart';
 import 'app_theme.dart';
 import 'theme_controller.dart';
@@ -75,6 +76,10 @@ class AmlakApp extends StatelessWidget {
             page: () => const LatestFilesPage(),
           ),
           GetPage(
+            name: AppRoutes.propertyOffers,
+            page: () => const PropertyOffersPage(),
+          ),
+          GetPage(
             name: AppRoutes.chats,
             page: () =>
                 const ChatsPage(initialSection: ChatSection.privateChats),
@@ -114,6 +119,7 @@ class AppRoutes {
   static const businessSettings = '/business/settings';
   static const properties = '/properties';
   static const latestFiles = '/properties/latest';
+  static const propertyOffers = '/properties/offers';
   static const chats = '/chats';
   static const vaults = '/vaults';
   static const propertyCreate = '/properties/create';

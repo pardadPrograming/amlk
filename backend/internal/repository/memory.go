@@ -38,6 +38,7 @@ type MemoryStore struct {
 	neighborhoods         map[string]domain.Neighborhood
 	propertyFiles         map[string]domain.PropertyFile
 	propertyShareRequests map[string]domain.PropertyShareRequest
+	propertyOffers        map[string]domain.PropertyOffer
 	contacts              map[string]domain.Contact
 	cities                map[string]domain.City
 	systemAreas           map[string]domain.SystemArea
@@ -68,6 +69,7 @@ func NewMemoryStore() *MemoryStore {
 		neighborhoods:         map[string]domain.Neighborhood{},
 		propertyFiles:         map[string]domain.PropertyFile{},
 		propertyShareRequests: map[string]domain.PropertyShareRequest{},
+		propertyOffers:        map[string]domain.PropertyOffer{},
 		contacts:              map[string]domain.Contact{},
 		cities:                map[string]domain.City{},
 		systemAreas:           map[string]domain.SystemArea{},
@@ -1471,6 +1473,78 @@ func (s *MemoryStore) ListPropertyShareRequestsForRequester(ctx context.Context,
 		}
 	}
 	sort.SliceStable(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result, nil
+}
+
+func (s *MemoryStore) CreatePropertyOffer(ctx context.Context, offer domain.PropertyOffer) (domain.PropertyOffer, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if offer.DedupKey != "" {
+		for _, existing := range s.propertyOffers {
+			if existing.BusinessID == offer.BusinessID && existing.DedupKey == offer.DedupKey {
+				return existing, nil
+			}
+		}
+	}
+	now := time.Now().UTC()
+	offer.ID = support.NewID()
+	offer.CreatedAt = now
+	offer.UpdatedAt = now
+	if offer.Status == "" {
+		offer.Status = domain.PropertyOfferCandidate
+	}
+	s.propertyOffers[offer.ID] = offer
+	return offer, nil
+}
+
+func (s *MemoryStore) GetPropertyOffer(ctx context.Context, businessID string, offerID string) (domain.PropertyOffer, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	offer, ok := s.propertyOffers[offerID]
+	if !ok || offer.BusinessID != businessID {
+		return domain.PropertyOffer{}, ErrNotFound
+	}
+	return offer, nil
+}
+
+func (s *MemoryStore) UpdatePropertyOffer(ctx context.Context, offer domain.PropertyOffer) (domain.PropertyOffer, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	existing, ok := s.propertyOffers[offer.ID]
+	if !ok || existing.BusinessID != offer.BusinessID {
+		return domain.PropertyOffer{}, ErrNotFound
+	}
+	offer.CreatedAt = existing.CreatedAt
+	offer.UpdatedAt = time.Now().UTC()
+	s.propertyOffers[offer.ID] = offer
+	return offer, nil
+}
+
+func (s *MemoryStore) ListPropertyOffersForUser(ctx context.Context, businessID string, userID string, scope string) ([]domain.PropertyOffer, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := []domain.PropertyOffer{}
+	for _, offer := range s.propertyOffers {
+		if offer.BusinessID != businessID {
+			continue
+		}
+		switch scope {
+		case "incoming":
+			if offer.RequesterUserID != userID {
+				continue
+			}
+		case "outgoing":
+			if offer.OwnerUserID != userID {
+				continue
+			}
+		default:
+			if offer.RequesterUserID != userID && offer.OwnerUserID != userID {
+				continue
+			}
+		}
+		result = append(result, offer)
+	}
+	sort.SliceStable(result, func(i, j int) bool { return result[i].UpdatedAt.After(result[j].UpdatedAt) })
 	return result, nil
 }
 

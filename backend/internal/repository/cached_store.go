@@ -507,10 +507,27 @@ func (s *CachedStore) ListPropertyShareRequestsForRequester(ctx context.Context,
 	return s.primary.ListPropertyShareRequestsForRequester(ctx, businessID, requesterUserID)
 }
 
+func (s *CachedStore) CreatePropertyOffer(ctx context.Context, offer domain.PropertyOffer) (domain.PropertyOffer, error) {
+	return s.primary.CreatePropertyOffer(ctx, offer)
+}
+
+func (s *CachedStore) GetPropertyOffer(ctx context.Context, businessID string, offerID string) (domain.PropertyOffer, error) {
+	return s.primary.GetPropertyOffer(ctx, businessID, offerID)
+}
+
+func (s *CachedStore) UpdatePropertyOffer(ctx context.Context, offer domain.PropertyOffer) (domain.PropertyOffer, error) {
+	return s.primary.UpdatePropertyOffer(ctx, offer)
+}
+
+func (s *CachedStore) ListPropertyOffersForUser(ctx context.Context, businessID string, userID string, scope string) ([]domain.PropertyOffer, error) {
+	return s.primary.ListPropertyOffersForUser(ctx, businessID, userID, scope)
+}
+
 func (s *CachedStore) CreateContact(ctx context.Context, contact domain.Contact) (domain.Contact, error) {
 	item, err := s.primary.CreateContact(ctx, contact)
 	if err == nil {
 		s.publishSearchInvalidate(ctx, item.BusinessID, item.CreatedByID)
+		s.publishContactChanged(ctx, item.BusinessID, item.CreatedByID, item.ID)
 	}
 	return item, err
 }
@@ -527,6 +544,7 @@ func (s *CachedStore) UpdateContact(ctx context.Context, contact domain.Contact)
 	item, err := s.primary.UpdateContact(ctx, contact)
 	if err == nil {
 		s.publishSearchInvalidate(ctx, item.BusinessID, item.CreatedByID)
+		s.publishContactChanged(ctx, item.BusinessID, item.CreatedByID, item.ID)
 	}
 	return item, err
 }
@@ -552,6 +570,19 @@ func (s *CachedStore) publishPropertyChanged(ctx context.Context, businessID, us
 			BusinessID: businessID,
 			UserID:     userID,
 			PropertyID: propertyID,
+		},
+	})
+}
+
+func (s *CachedStore) publishContactChanged(ctx context.Context, businessID, userID, contactID string) {
+	events.SafePublish(ctx, s.logger, s.publisher, events.Event{
+		Type:        events.ContactChangedEvent,
+		AggregateID: businessID + ":" + contactID,
+		OccurredAt:  time.Now().UTC(),
+		Payload: events.ContactChangedPayload{
+			BusinessID: businessID,
+			UserID:     userID,
+			ContactID:  contactID,
 		},
 	})
 }
