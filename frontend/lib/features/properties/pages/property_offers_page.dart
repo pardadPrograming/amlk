@@ -160,6 +160,17 @@ class _OfferCard extends StatelessWidget {
                   ? 'درخواست: ${offer.requestTitle} | سهم پیشنهادی ${offer.commissionPercent.toStringAsFixed(0)}%'
                   : 'گیرنده: ${offer.contactName.isEmpty ? offer.requesterName : offer.contactName} | مچ ${offer.score}%',
             ),
+            if (offer.propertyFile != null) ...[
+              const SizedBox(height: 10),
+              _PropertyPreview(file: offer.propertyFile!),
+            ],
+            if (incoming &&
+                (offer.status == 'requester_approved' ||
+                    offer.status == 'approved') &&
+                (offer.ownerName.isNotEmpty || offer.owner != null)) ...[
+              const SizedBox(height: 10),
+              _OwnerPreview(offer: offer),
+            ],
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
@@ -275,6 +286,78 @@ class _OfferCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _PropertyPreview extends StatelessWidget {
+  const _PropertyPreview({required this.file});
+
+  final PropertyFileModel file;
+
+  @override
+  Widget build(BuildContext context) {
+    final address = file.addresses.isEmpty ? null : file.addresses.first;
+    final area = file.houseInfo['areaM2']?.toString() ?? '';
+    final rooms = file.houseInfo['bedrooms']?.toString() ?? '';
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: 10,
+              runSpacing: 6,
+              children: [
+                if (area.isNotEmpty) Text('$area متر'),
+                if (rooms.isNotEmpty) Text('$rooms خواب'),
+                if (file.finalPrice > 0) Text('قیمت ${file.finalPrice}'),
+                if (file.depositPrice > 0) Text('رهن ${file.depositPrice}'),
+                if (file.rentPrice > 0) Text('اجاره ${file.rentPrice}'),
+              ],
+            ),
+            if (address != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                [
+                  address.areaName,
+                  address.streetName,
+                  address.neighborhoodName,
+                  if (address.manualExactAddress.isNotEmpty)
+                    address.manualExactAddress,
+                ].where((item) => item.trim().isNotEmpty).join('، '),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OwnerPreview extends StatelessWidget {
+  const _OwnerPreview({required this.offer});
+
+  final PropertyOfferModel offer;
+
+  @override
+  Widget build(BuildContext context) {
+    final owner = offer.owner;
+    final name = offer.ownerName.isNotEmpty
+        ? offer.ownerName
+        : owner?.displayName ?? '';
+    final phone = owner?.phone ?? '';
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(Icons.person_outline),
+      title: Text(name.isEmpty ? 'مالک فایل' : name),
+      subtitle: phone.isEmpty ? null : Text(phone),
+      dense: true,
     );
   }
 }

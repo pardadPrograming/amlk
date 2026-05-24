@@ -368,7 +368,14 @@ func (s *PropertyService) Offers(ctx context.Context, userID, businessID, scope 
 	if _, err := s.authorize(ctx, userID, businessID); err != nil {
 		return nil, err
 	}
-	return s.store.ListPropertyOffersForUser(ctx, businessID, userID, scope)
+	items, err := s.store.ListPropertyOffersForUser(ctx, businessID, userID, scope)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i] = s.enrichOfferForViewer(ctx, userID, items[i])
+	}
+	return items, nil
 }
 
 func (s *PropertyService) SendOffer(ctx context.Context, ownerID, businessID, offerID string, commissionPercent float64) (domain.PropertyOffer, error) {
@@ -419,7 +426,7 @@ func (s *PropertyService) SendOffer(ctx context.Context, ownerID, businessID, of
 		PropertyID: offer.PropertyFileID,
 		RequestID:  offer.RequestID,
 	})
-	return offer, nil
+	return s.enrichOfferForViewer(ctx, ownerID, offer), nil
 }
 
 func (s *PropertyService) RespondOffer(ctx context.Context, requesterID, businessID, offerID string, approve bool) (domain.PropertyOffer, error) {
@@ -462,7 +469,7 @@ func (s *PropertyService) RespondOffer(ctx context.Context, requesterID, busines
 		PropertyID: offer.PropertyFileID,
 		RequestID:  offer.RequestID,
 	})
-	return offer, nil
+	return s.enrichOfferForViewer(ctx, requesterID, offer), nil
 }
 
 func (s *PropertyService) FinalizeOffer(ctx context.Context, ownerID, businessID, offerID string, approve bool) (domain.PropertyOffer, error) {
@@ -487,7 +494,7 @@ func (s *PropertyService) FinalizeOffer(ctx context.Context, ownerID, businessID
 		if err != nil {
 			return domain.PropertyOffer{}, err
 		}
-		return offer, nil
+		return s.enrichOfferForViewer(ctx, ownerID, offer), nil
 	}
 	shared, err := s.createSharedFileFromOffer(ctx, businessID, offer)
 	if err != nil {
@@ -510,7 +517,7 @@ func (s *PropertyService) FinalizeOffer(ctx context.Context, ownerID, businessID
 		PropertyID: offer.PropertyFileID,
 		RequestID:  offer.RequestID,
 	})
-	return offer, nil
+	return s.enrichOfferForViewer(ctx, ownerID, offer), nil
 }
 
 func (s *PropertyService) DecideShareRequest(ctx context.Context, ownerID, businessID, requestID string, approve bool) (domain.PropertyShareRequest, error) {
@@ -664,6 +671,53 @@ func appendOfferHistory(items []domain.PropertyOfferHistoryEntry, actorID, actio
 		Note:       note,
 		CreatedAt:  time.Now().UTC(),
 	})
+}
+
+func (s *PropertyService) enrichOfferForViewer(ctx context.Context, viewerID string, offer domain.PropertyOffer) domain.PropertyOffer {
+	fullAccess := offerViewerHasFullAccess(viewerID, offer)
+	if file, err := s.store.GetPropertyFile(ctx, offer.BusinessID, offer.PropertyFileID); err == nil {
+		if !fullAccess {
+			file = redactOfferedPropertyFile(file)
+		}
+		offer.PropertyFile = &file
+	}
+	if fullAccess {
+		if owner, err := s.store.GetUser(ctx, offer.OwnerUserID); err == nil {
+			offer.OwnerName = firstNonEmpty(owner.DisplayName, strings.TrimSpace(owner.FirstName+" "+owner.LastName), owner.Phone)
+			ownerCopy := owner
+			offer.Owner = &ownerCopy
+		}
+	} else if viewerID == offer.RequesterUserID {
+		offer.OwnerUserID = ""
+		offer.OwnerName = ""
+		offer.Owner = nil
+	}
+	return offer
+}
+
+func offerViewerHasFullAccess(viewerID string, offer domain.PropertyOffer) bool {
+	if viewerID == offer.OwnerUserID {
+		return true
+	}
+	if viewerID != offer.RequesterUserID {
+		return false
+	}
+	return offer.Status == domain.PropertyOfferRequesterApproved || offer.Status == domain.PropertyOfferApproved
+}
+
+func redactOfferedPropertyFile(file domain.PropertyFile) domain.PropertyFile {
+	file.OwnerUserID = ""
+	file.SharedFromOwnerID = ""
+	file.InternalDescription = ""
+	file.VaultIDs = nil
+	file.VaultPlacements = nil
+	file.SharingHistory = nil
+	file.BusinessCommissionPercent = 0
+	file.OwnerCommissionPercent = 0
+	for i := range file.Addresses {
+		file.Addresses[i].ManualExactAddress = ""
+	}
+	return file
 }
 
 func (s *PropertyService) createSharedFileFromOffer(ctx context.Context, businessID string, offer domain.PropertyOffer) (domain.PropertyFile, error) {

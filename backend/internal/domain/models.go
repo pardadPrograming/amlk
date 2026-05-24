@@ -276,6 +276,7 @@ type PropertyOffer struct {
 	PropertyTitle     string                      `json:"propertyTitle"`
 	OwnerUserID       string                      `json:"ownerUserId"`
 	OwnerName         string                      `json:"ownerName,omitempty"`
+	Owner             *User                       `json:"owner,omitempty"`
 	RequesterUserID   string                      `json:"requesterUserId"`
 	RequesterName     string                      `json:"requesterName,omitempty"`
 	ContactID         string                      `json:"contactId,omitempty"`
@@ -288,6 +289,7 @@ type PropertyOffer struct {
 	Status            PropertyOfferStatus         `json:"status"`
 	ChatChannelID     string                      `json:"chatChannelId,omitempty"`
 	SharedCopyFileID  string                      `json:"sharedCopyFileId,omitempty"`
+	PropertyFile      *PropertyFile               `json:"propertyFile,omitempty"`
 	History           []PropertyOfferHistoryEntry `json:"history,omitempty"`
 	CreatedAt         time.Time                   `json:"createdAt"`
 	UpdatedAt         time.Time                   `json:"updatedAt"`

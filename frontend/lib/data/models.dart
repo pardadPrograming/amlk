@@ -477,6 +477,8 @@ class PropertyOfferModel {
     required this.propertyFileId,
     required this.propertyTitle,
     this.ownerUserId = '',
+    this.ownerName = '',
+    this.owner,
     this.requesterUserId = '',
     this.requesterName = '',
     this.contactName = '',
@@ -487,6 +489,7 @@ class PropertyOfferModel {
     this.status = '',
     this.chatChannelId = '',
     this.sharedCopyFileId = '',
+    this.propertyFile,
     this.history = const [],
   });
 
@@ -494,6 +497,8 @@ class PropertyOfferModel {
   final String propertyFileId;
   final String propertyTitle;
   final String ownerUserId;
+  final String ownerName;
+  final AppUser? owner;
   final String requesterUserId;
   final String requesterName;
   final String contactName;
@@ -504,6 +509,7 @@ class PropertyOfferModel {
   final String status;
   final String chatChannelId;
   final String sharedCopyFileId;
+  final PropertyFileModel? propertyFile;
   final List<PropertyOfferHistoryModel> history;
 
   factory PropertyOfferModel.fromJson(Map<String, dynamic> json) =>
@@ -512,6 +518,10 @@ class PropertyOfferModel {
         propertyFileId: json['propertyFileId']?.toString() ?? '',
         propertyTitle: json['propertyTitle']?.toString() ?? '',
         ownerUserId: json['ownerUserId']?.toString() ?? '',
+        ownerName: json['ownerName']?.toString() ?? '',
+        owner: json['owner'] is Map
+            ? AppUser.fromJson(Map<String, dynamic>.from(json['owner'] as Map))
+            : null,
         requesterUserId: json['requesterUserId']?.toString() ?? '',
         requesterName: json['requesterName']?.toString() ?? '',
         contactName: json['contactName']?.toString() ?? '',
@@ -522,6 +532,11 @@ class PropertyOfferModel {
         status: json['status']?.toString() ?? '',
         chatChannelId: json['chatChannelId']?.toString() ?? '',
         sharedCopyFileId: json['sharedCopyFileId']?.toString() ?? '',
+        propertyFile: json['propertyFile'] is Map
+            ? PropertyFileModel.fromJson(
+                Map<String, dynamic>.from(json['propertyFile'] as Map),
+              )
+            : null,
         history: (json['history'] as List? ?? const [])
             .map(
               (e) => PropertyOfferHistoryModel.fromJson(
